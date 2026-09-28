@@ -574,7 +574,10 @@ export function Transfer() {
         // crop. The sender renders a square QR, while many phone camera streams are
         // 16:9, so the crop concentrates pixels on the optical payload.
         const misses=noDetectionDecodeCountRef.current;
-        const useCenterRecovery=misses>=3 && misses%2===0;
+        // Start recovery early. We alternate a full camera frame with a
+        // centered square crop after the first miss, so a centered QR gets
+        // maximum pixels without starving the full-frame path for off-center QRs.
+        const useCenterRecovery=misses>=1 && misses%2===1;
 
         let image:ImageData;
         let width:number;
@@ -610,8 +613,9 @@ export function Transfer() {
           fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(18,Math.min(40,scanDelayRef.current)));
           return;
         }
-        // Only pay for quadrant recovery after sustained misses.
-        const decodeDepth=misses>=6?1:0;
+        // Keep the normal acquisition job to ONE jsQR pass. Quadrant recovery
+        // is a last-resort mode after sustained misses, not the default path.
+        const decodeDepth=misses>=12?1:0;
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth);
         if(job){
           decoderCallsRef.current+=1;
@@ -624,7 +628,7 @@ export function Transfer() {
               decodeMaxDimensionRef.current=1120;
             }else{
               noDetectionDecodeCountRef.current+=1;
-              if(noDetectionDecodeCountRef.current>=10){
+              if(noDetectionDecodeCountRef.current>=6){
                 decodeMaxDimensionRef.current=1280;
               }
             }
