@@ -434,6 +434,8 @@ export function Transfer() {
     qrPoolRef.current?.terminate();
     qrPoolRef.current=null;
     if(benchmarkTimerRef.current!==null){window.clearTimeout(benchmarkTimerRef.current);benchmarkTimerRef.current=null;}
+    benchmarkStartedRef.current=null;
+    setBenchmarking(false);
     if(fallbackLoopRef.current!==null){window.clearTimeout(fallbackLoopRef.current);fallbackLoopRef.current=null;}
     if(nativeLoopRef.current!==null){window.clearTimeout(nativeLoopRef.current);nativeLoopRef.current=null;}
     fallbackActiveRef.current=false;
