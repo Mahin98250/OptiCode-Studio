@@ -461,6 +461,34 @@ async function qrTransferFrameWorkerDiagnostic() {
   }
 }
 
+async function qrFountainFrameWorkerDiagnostic() {
+  if (typeof Worker === 'undefined') return 'Worker API unavailable; physical camera path remains separately testable.';
+
+  const original = makeBytes(1_200, 311);
+  const file = new File([original], 'diagnostic-fountain-qr.bin', { type: 'application/octet-stream' });
+  const plan = await createFountainTransfer(file);
+  const raw = await plan.getDroplet(0, 0, 1);
+  const parsed = parseFountainFrame(raw);
+  assert(parsed, 'Fountain QR fixture did not parse.');
+
+  const canvas = document.createElement('canvas');
+  drawQrMatricesToCanvas(canvas, createQrMatrices([raw]), 720, 18);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  assert(ctx, 'Fountain QR diagnostic canvas context unavailable.');
+
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pool = new QrDecodePool(1);
+  try {
+    const result = await pool.decode(image.data.buffer, image.width, image.height, 0);
+    assert(result, 'Fountain QR worker returned no result.');
+    assert(result.values.includes(raw), 'QR worker failed to recover the exact fountain payload at runtime resolution.');
+    assert(parsed.data.length > OR_TRANSFER_CHUNK_CHARS, 'Fountain fixture did not exercise the larger optical payload path.');
+    return 'Exact ORF2 fountain frame · ' + raw.length + ' chars · 720px runtime-sized worker decode';
+  } finally {
+    pool.terminate();
+  }
+}
+
 async function qrDecoderWorkerDiagnostic() {
   if (typeof Worker === 'undefined') return 'Worker API unavailable; native BarcodeDetector remains the primary scanner path.';
 
@@ -775,6 +803,7 @@ export async function runProtocolDiagnostics(
     ['Performance · QR encoder worker', qrEncoderWorkerDiagnostic],
     ['Performance · QR decoder worker', qrDecoderWorkerDiagnostic],
     ['Performance · exact ORX1 QR frame', qrTransferFrameWorkerDiagnostic],
+    ['Performance · exact ORF2 fountain QR frame', qrFountainFrameWorkerDiagnostic],
     ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
