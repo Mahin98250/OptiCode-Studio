@@ -727,10 +727,12 @@ export function Transfer() {
         // crop. The sender renders a square QR, while many phone camera streams are
         // 16:9, so the crop concentrates pixels on the optical payload.
         const misses=noDetectionDecodeCountRef.current;
-        // Start recovery early. We alternate a full camera frame with a
-        // centered square crop after the first miss, so a centered QR gets
-        // maximum pixels without starving the full-frame path for off-center QRs.
-        const useCenterRecovery=misses>=1 && misses%2===1;
+        // Compatibility MVP always displays one large centered square QR.
+        // Decode that optical ROI first at 720px. The old 1120px full-frame
+        // baseline made jsQR spend ~1.3s on a single acquisition on this phone.
+        // A smaller centered ROI reduces pixel work while preserving the QR's
+        // module resolution. Full-frame recovery is deliberately occasional.
+        const useCenterRecovery=misses%4!==3;
 
         let image:ImageData;
         let width:number;
@@ -738,18 +740,22 @@ export function Transfer() {
 
         if(useCenterRecovery){
           const cropSize=Math.min(sourceWidth,sourceHeight);
-          const scale=Math.max(1,1120/cropSize);
+          const target=720;
+          const scale=Math.min(1,target/cropSize);
           width=Math.max(1,Math.round(cropSize*scale));
           height=width;
           if(recoveryCanvas.width!==width)recoveryCanvas.width=width;
           if(recoveryCanvas.height!==height)recoveryCanvas.height=height;
-          recoveryCtx.imageSmoothingEnabled=false;
+          recoveryCtx.imageSmoothingEnabled=true;
+          recoveryCtx.imageSmoothingQuality='high';
           const sx=Math.floor((sourceWidth-cropSize)/2);
           const sy=Math.floor((sourceHeight-cropSize)/2);
           recoveryCtx.drawImage(video,sx,sy,cropSize,cropSize,0,0,width,height);
           image=recoveryCtx.getImageData(0,0,width,height);
         }else{
-          const maxDimension=decodeMaxDimensionRef.current;
+          // Keep occasional full-frame recovery bounded as well. This path
+          // exists for alignment/off-center recovery, not as the hot path.
+          const maxDimension=Math.min(720,decodeMaxDimensionRef.current);
           const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
           width=Math.max(1,Math.round(sourceWidth*scale));
           height=Math.max(1,Math.round(sourceHeight*scale));
@@ -781,8 +787,8 @@ export function Transfer() {
               decodeMaxDimensionRef.current=1120;
             }else{
               noDetectionDecodeCountRef.current+=1;
-              if(noDetectionDecodeCountRef.current>=6){
-                decodeMaxDimensionRef.current=1280;
+              if(noDetectionDecodeCountRef.current>=12){
+                decodeMaxDimensionRef.current=720;
               }
             }
 
