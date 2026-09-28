@@ -10,7 +10,7 @@ function drawMatrixToCanvas(
   x: number,
   y: number,
   size: number,
-  margin = 10,
+  margin = 16,
 ) {
   const cell = (size - margin * 2) / matrix.size;
   ctx.fillStyle = '#ffffff';
@@ -31,7 +31,7 @@ function drawMatrixToCanvas(
 }
 
 function toMatrix(value: string): QrMatrix {
-  const code = QRCode.create(value, { errorCorrectionLevel: 'L' }) as unknown as QRCodeMatrix;
+  const code = QRCode.create(value, { errorCorrectionLevel: 'M' }) as unknown as QRCodeMatrix;
   const raw = code.modules.data;
   return {
     size: code.modules.size,
@@ -63,13 +63,13 @@ export function drawQrMatricesToCanvas(
   if (active.length === 1) {
     // A single optical lane should use the full display. Rendering it as one
     // quadrant makes phone-to-phone transfer unnecessarily difficult.
-    drawMatrixToCanvas(ctx, active[0], gap, gap, size - gap * 2, 10);
+    drawMatrixToCanvas(ctx, active[0], gap, gap, size - gap * 2, 16);
     return;
   }
 
   if (active.length === 2) {
     const cell = Math.floor((size - gap * 3) / 2);
-    drawMatrixToCanvas(ctx, active[0], gap, gap, cell, 10);
+    drawMatrixToCanvas(ctx, active[0], gap, gap, cell, 16);
     drawMatrixToCanvas(ctx, active[1], gap * 2 + cell, gap, cell, 10);
     return;
   }
