@@ -384,6 +384,50 @@ async function qrEncoderWorkerDiagnostic() {
   }
 }
 
+async function qrPhoneGeometryRecoveryDiagnostic() {
+  if (typeof Worker === 'undefined') return 'Worker API unavailable; physical camera path remains separately testable.';
+
+  const original = makeBytes(525, 227);
+  const file = new File([original], 'diagnostic-phone-geometry.bin', { type: 'application/octet-stream' });
+  const plan = await createTransfer(file);
+  const raw = await plan.getFrame(1);
+
+  // Model a common phone-camera geometry: a 16:9 frame viewing a square
+  // sender display. The receiver recovery crop should concentrate pixels
+  // back onto the square QR instead of decoding the entire letterboxed frame.
+  const qrCanvas = document.createElement('canvas');
+  drawQrMatricesToCanvas(qrCanvas, createQrMatrices([raw]), 900, 18);
+
+  const source = document.createElement('canvas');
+  source.width = 1920;
+  source.height = 1080;
+  const sourceCtx = source.getContext('2d', { willReadFrequently: true });
+  assert(sourceCtx, 'Phone-geometry source canvas context unavailable.');
+  sourceCtx.fillStyle = '#ffffff';
+  sourceCtx.fillRect(0, 0, source.width, source.height);
+  sourceCtx.imageSmoothingEnabled = false;
+  sourceCtx.drawImage(qrCanvas, 420, 0, 1080, 1080);
+
+  const recovery = document.createElement('canvas');
+  recovery.width = 1120;
+  recovery.height = 1120;
+  const recoveryCtx = recovery.getContext('2d', { willReadFrequently: true });
+  assert(recoveryCtx, 'Phone-geometry recovery canvas context unavailable.');
+  recoveryCtx.imageSmoothingEnabled = false;
+  recoveryCtx.drawImage(source, 420, 0, 1080, 1080, 0, 0, 1120, 1120);
+
+  const image = recoveryCtx.getImageData(0, 0, recovery.width, recovery.height);
+  const pool = new QrDecodePool(1);
+  try {
+    const result = await pool.decode(image.data.buffer, image.width, image.height, 0);
+    assert(result, 'Phone-geometry recovery worker returned no result.');
+    assert(result.values.includes(raw), 'Centered square recovery could not decode the ORX1 payload from a 16:9 camera geometry.');
+    return '16:9 source → centered 1080px square crop → 1120px recovery decode succeeded';
+  } finally {
+    pool.terminate();
+  }
+}
+
 async function qrTransferFrameWorkerDiagnostic() {
   if (typeof Worker === 'undefined') return 'Worker API unavailable; physical camera path remains separately testable.';
 
@@ -728,6 +772,7 @@ export async function runProtocolDiagnostics(
     ['Performance · QR encoder worker', qrEncoderWorkerDiagnostic],
     ['Performance · QR decoder worker', qrDecoderWorkerDiagnostic],
     ['Performance · exact ORX1 QR frame', qrTransferFrameWorkerDiagnostic],
+    ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
       return r.payloadBytes + ' payload bytes · ' + r.capacityBytes + ' byte capacity · CRC-32 verified';
