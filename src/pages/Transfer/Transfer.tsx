@@ -369,6 +369,7 @@ export function Transfer() {
     receivingRef.current=false;
     streamRef.current?.getTracks().forEach(t=>t.stop());
     streamRef.current=null;
+    void setScreenWakeLock(false);
     qrPoolRef.current?.terminate();
     qrPoolRef.current=null;
     if(benchmarkTimerRef.current!==null){window.clearTimeout(benchmarkTimerRef.current);benchmarkTimerRef.current=null;}
@@ -690,6 +691,7 @@ export function Transfer() {
         audio:false,
       });
       streamRef.current=stream;receivingRef.current=true;setReceiving(true);
+      void setScreenWakeLock(true);
       const videoTrack=stream.getVideoTracks()[0];
       if(!videoTrack){
         throw new Error('Camera permission succeeded, but no video track was returned.');
