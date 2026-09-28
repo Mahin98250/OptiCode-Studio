@@ -9,7 +9,7 @@ export const OR_TRANSFER_BYTES_PER_FRAME = Math.floor((OR_TRANSFER_CHUNK_CHARS /
 // Keep optical payloads comfortably below QR version 40-L capacity so phone cameras have more decoding margin.
 export const OR_TRANSFER_GRID_SIZE = 4;
 export const OR_TRANSFER_MAX_FILE_SIZE = 100 * 1024 * 1024;
-const MAX_TRANSFER_FRAMES = 150000;
+const MAX_TRANSFER_FRAMES = Math.ceil(OR_TRANSFER_MAX_FILE_SIZE / OR_TRANSFER_BYTES_PER_FRAME);
 
 function toBase64(bytes: Uint8Array) {
   let binary = '';
