@@ -853,8 +853,9 @@ export function Transfer() {
           image=ctx.getImageData(0,0,width,height);
         }
 
-        // Do not serialize camera capture behind a slow QR decode. The pool has
-        // multiple workers, so keep feeding fresh frames while workers are busy.
+        // Do not serialize camera capture behind a slow QR decode. The single
+        // MVP worker stays deterministic; skipped busy samples are retried on the
+        // next camera tick rather than queueing stale frames.
         if(qrPoolRef.current.available<0){
           fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(18,Math.min(40,scanDelayRef.current)));
           return;
@@ -910,7 +911,7 @@ export function Transfer() {
       }
 
       if(receivingRef.current && fallbackActiveRef.current){
-        // 30–60 ms capture cadence feeds both workers and gives the camera
+        // 30–60 ms capture cadence gives the camera
         // several acquisition opportunities during each displayed QR interval.
         fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(30,Math.min(60,scanDelayRef.current)));
       }
