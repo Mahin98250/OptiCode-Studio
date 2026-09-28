@@ -57,12 +57,9 @@ function decode(request:DecodeRequest):DecodeResult{
         const fast=jsQR(data,request.width,request.height,{inversionAttempts:'dontInvert'})?.data;
         if(fast){
           add(fast);
-          // Compatibility frames are the MVP's dominant one-QR path. Once a
-          // valid ORX1 frame is found in the full image, there is no reason to
-          // spend four more expensive quadrant scans on the same frame.
-          if(fast.startsWith('ORX1:')) return;
         }else{
-          add(jsQR(data,request.width,request.height,{inversionAttempts:'attemptBoth'})?.data);
+          const fallback=jsQR(data,request.width,request.height,{inversionAttempts:'attemptBoth'})?.data;
+          add(fallback);
         }
         return;
       }
