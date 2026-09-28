@@ -4,6 +4,7 @@ export const OR_TRANSFER_PREFIX = 'ORX1:';
 // Conservative MVP payload: smaller QR symbols are substantially easier for phone cameras to acquire reliably.
 // Throughput optimization comes only after physical transfer is proven.
 export const OR_TRANSFER_CHUNK_CHARS = 700;
+export const OR_TRANSFER_BYTES_PER_FRAME = Math.floor((OR_TRANSFER_CHUNK_CHARS / 4) * 3);
 // High-speed optical transfer: each displayed frame can carry multiple independent QR symbols.
 // Keep optical payloads comfortably below QR version 40-L capacity so phone cameras have more decoding margin.
 export const OR_TRANSFER_GRID_SIZE = 4;
@@ -76,9 +77,9 @@ export async function createTransfer(file: File) {
   const hash = await sha256(bytes);
   const session = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
-  // 1875 raw bytes become 2500 base64 characters. Generating a frame on demand
-  // avoids holding every QR payload in memory at once.
-  const bytesPerFrame = Math.floor((OR_TRANSFER_CHUNK_CHARS / 4) * 3);
+  // Generate frames on demand so the sender does not hold every QR payload
+  // in memory at once.
+  const bytesPerFrame = OR_TRANSFER_BYTES_PER_FRAME;
   const total = Math.max(1, Math.ceil(file.size / bytesPerFrame));
 
   if (total > MAX_TRANSFER_FRAMES) {
@@ -137,9 +138,20 @@ export function parseTransferFrame(value:string): TransferFrame | null {
     index > total ||
     total > MAX_TRANSFER_FRAMES ||
     size < 0 ||
+    size > OR_TRANSFER_MAX_FILE_SIZE ||
     (data.length > OR_TRANSFER_CHUNK_CHARS) ||
     (data.length === 0 && !(total === 1 && index === 1))
   ) return null;
+
+  const expectedTotal = Math.max(1, Math.ceil(size / OR_TRANSFER_BYTES_PER_FRAME));
+  if (total !== expectedTotal) return null;
+
+  const expectedBytes = Math.min(
+    OR_TRANSFER_BYTES_PER_FRAME,
+    Math.max(0, size - (index - 1) * OR_TRANSFER_BYTES_PER_FRAME),
+  );
+  const expectedBase64Length = expectedBytes === 0 ? 0 : 4 * Math.ceil(expectedBytes / 3);
+  if (data.length !== expectedBase64Length) return null;
 
   try {
     return {
