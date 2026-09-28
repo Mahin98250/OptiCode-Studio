@@ -580,9 +580,11 @@ export function Transfer() {
     if(!receivingRef.current||!videoRef.current||!detectorRef.current)return;
     const started=performance.now();
     let foundCount=0;
+    let decodeMs=0;
     try{
       const found=await detectorRef.current.detect(videoRef.current);
       const detectorMs=performance.now()-started;
+      decodeMs=detectorMs;
       foundCount=found.length;
       if(detectorMs>450) nativeSlowRef.current+=1;
       else nativeSlowRef.current=0;
@@ -602,7 +604,6 @@ export function Transfer() {
     // Keep decoder telemetry isolated from IndexedDB/reconstruction work.
     // This makes camera-engine latency directly measurable instead of hiding
     // storage/UI pipeline time inside the displayed decode number.
-    const decodeMs=detectorMs;
     const now=performance.now();
     if(receiverStartedRef.current===null)receiverStartedRef.current=started;
     if(detectedWindowRef.current.started===0)detectedWindowRef.current.started=now;
