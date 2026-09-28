@@ -1,21 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, CheckCircle2, Download, FileUp, Gauge, LockKeyhole, Radio, ScanLine, ShieldCheck, TimerReset, WifiOff, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { BrowserQRCodeReader } from '@zxing/browser';
 import { QrDecodePool } from '../../lib/qrDecodePool';
 import { createBenchmarkStart, finishBenchmark, type BenchmarkSample, type OpticalBenchmark } from '../../lib/opticalBenchmark';
-import { OR_TRANSFER_GRID_SIZE, addTransferFrame, createTransfer, isTransferFrame, parseTransferFrame, reconstructTransfer } from '../../lib/orTransfer';
+import { addTransferFrame, createTransfer, isTransferFrame, parseTransferFrame, reconstructTransfer } from '../../lib/orTransfer';
 import { createQrMatrices, drawQrMatricesToCanvas } from '../../lib/qrCanvas';
 import { QrEncodePool, type QrEncodeResult } from '../../lib/qrEncodePool';
 import { createFountainDecoder, createFountainTransfer, FOUNTAIN_BLOCK_BYTES, FOUNTAIN_GRID_SIZE, isFountainFrame, parseFountainFrame, type FountainDecoder, type FountainDroplet, type FountainPlan } from '../../lib/fountain';
 import { addMultiImageChunk, isMultiImageQr, reconstructMultiImage } from '../../lib/imageQr';
 import type { QrMatrix } from '../../lib/qrEncodePool';
-
-type Detector = { detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue?:string}>> };
-type DetectorCtor = {
-  new (options?:{formats?:string[]}): Detector;
-  getSupportedFormats?: () => Promise<string[]>;
-};
 
 type Result = { url:string; name:string; size:number };
 type Progress = { mode:'fountain'|'compatibility'|'multi-image'; session:string; name:string; received:number; total:number; duplicates:number };
@@ -62,7 +55,6 @@ export function Transfer() {
   const [receiving,setReceiving]=useState(false);
   const [progress,setProgress]=useState<Progress|null>(null);
   const [result,setResult]=useState<Result|null>(null);
-  const [compatMissing,setCompatMissing]=useState<number|null>(null);
   const [autoTune,setAutoTune]=useState(false);
   const [benchmarking,setBenchmarking]=useState(false);
   const [benchmark,setBenchmark]=useState<OpticalBenchmark|null>(null);
@@ -71,14 +63,10 @@ export function Transfer() {
   const inputRef=useRef<HTMLInputElement>(null);
   const videoRef=useRef<HTMLVideoElement>(null);
   const streamRef=useRef<MediaStream|null>(null);
-  const detectorRef=useRef<Detector|null>(null);
-  const zxingReaderRef=useRef<BrowserQRCodeReader|null>(null);
-  const zxingControlsRef=useRef<{stop:()=>void}|null>(null);
   const receivingRef=useRef(false);
   const fallbackCanvasRef=useRef<HTMLCanvasElement|null>(null);
   const recoveryCanvasRef=useRef<HTMLCanvasElement|null>(null);
   const qrPoolRef=useRef<QrDecodePool|null>(null);
-  const timerRef=useRef<number|null>(null);
   const playbackRafRef=useRef<number|null>(null);
   const playbackLastAtRef=useRef(0);
   const playbackGroupRef=useRef(0);
@@ -116,11 +104,8 @@ export function Transfer() {
   const benchmarkSamplesRef=useRef<BenchmarkSample[]>([]);
   const benchmarkTimerRef=useRef<number|null>(null);
   const wakeLockRef=useRef<WakeLockSentinel|null>(null);
-  const nativeMissRef=useRef(0);
-  const nativeSlowRef=useRef(0);
   const fallbackLoopRef=useRef<number|null>(null);
   const fallbackActiveRef=useRef(false);
-  const zxingFallbackTimerRef=useRef<number|null>(null);
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
 
@@ -374,10 +359,6 @@ export function Transfer() {
     setPlaying(false);
     playbackGroupRef.current=0;
     void setScreenWakeLock(false);
-    if(timerRef.current!==null){
-      window.clearInterval(timerRef.current);
-      timerRef.current=null;
-    }
     if(playbackRafRef.current!==null){
       window.cancelAnimationFrame(playbackRafRef.current);
       playbackRafRef.current=null;
@@ -386,21 +367,14 @@ export function Transfer() {
   }
   function stopReceive(){
     receivingRef.current=false;
-    detectorRef.current=null;
     streamRef.current?.getTracks().forEach(t=>t.stop());
     streamRef.current=null;
     qrPoolRef.current?.terminate();
     qrPoolRef.current=null;
     if(benchmarkTimerRef.current!==null){window.clearTimeout(benchmarkTimerRef.current);benchmarkTimerRef.current=null;}
     if(fallbackLoopRef.current!==null){window.clearTimeout(fallbackLoopRef.current);fallbackLoopRef.current=null;}
-    if(zxingFallbackTimerRef.current!==null){window.clearTimeout(zxingFallbackTimerRef.current);zxingFallbackTimerRef.current=null;}
     fallbackActiveRef.current=false;
-    nativeMissRef.current=0;
-    nativeSlowRef.current=0;
     setReceiving(false);
-    try{ zxingControlsRef.current?.stop(); }catch{}
-    zxingControlsRef.current=null;
-    zxingReaderRef.current=null;
     if(zxingFallbackTimerRef.current!==null){window.clearTimeout(zxingFallbackTimerRef.current);zxingFallbackTimerRef.current=null;}
   }
   function resetDecoder(){
@@ -554,7 +528,6 @@ export function Transfer() {
   function startFallbackDecoder(){
     if(!receivingRef.current || fallbackActiveRef.current || !videoRef.current) return;
     fallbackActiveRef.current=true;
-    detectorRef.current=null;
     nativeMissRef.current=0;
     const canvas=fallbackCanvasRef.current ?? document.createElement('canvas');
     fallbackCanvasRef.current=canvas;
@@ -690,57 +663,6 @@ export function Transfer() {
       }
     };
     void loop();
-  }
-
-  async function scanLoop(){
-    if(!receivingRef.current||!videoRef.current||!detectorRef.current)return;
-    const started=performance.now();
-    let foundCount=0;
-    let decodeMs=0;
-    try{
-      const found=await detectorRef.current.detect(videoRef.current);
-      const detectorMs=performance.now()-started;
-      decodeMs=detectorMs;
-      foundCount=found.length;
-      if(detectorMs>450) nativeSlowRef.current+=1;
-      else nativeSlowRef.current=0;
-      // BarcodeDetector is a progressive enhancement. If this browser takes
-      // too long on a real QR, switch immediately to our bounded worker path.
-      if(nativeSlowRef.current>=1){ startFallbackDecoder(); return; }
-      const processStarted=performance.now();
-      await consumeDetected(found,detectorMs);
-      const processMs=performance.now()-processStarted;
-      if(receivingRef.current){
-        setTelemetry(prev=>({...prev,processMs:prev.processMs===0?processMs:prev.processMs*.7+processMs*.3}));
-      }
-    }catch{
-      startFallbackDecoder();
-      return;
-    }
-    // Keep decoder telemetry isolated from IndexedDB/reconstruction work.
-    // This makes camera-engine latency directly measurable instead of hiding
-    // storage/UI pipeline time inside the displayed decode number.
-    const now=performance.now();
-    if(receiverStartedRef.current===null)receiverStartedRef.current=started;
-    if(detectedWindowRef.current.started===0)detectedWindowRef.current.started=now;
-    detectedWindowRef.current.count+=foundCount;
-    const windowMs=now-detectedWindowRef.current.started;
-    if(windowMs>=500){
-      const seconds=windowMs/1000;
-      const detectedPerSecond=detectedWindowRef.current.count/seconds;
-      const elapsed=Math.max(0.001,(now-(receiverStartedRef.current ?? now))/1000);
-      const solvedPerSecond=solvedRef.current/elapsed;
-      const goodputKbps=(decodedBytesRef.current/1024)/elapsed;
-      setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,detectedPerSecond,solvedPerSecond,goodputKbps,duplicates:duplicateCountRef.current,decodeMs:prev.decodeMs===0?decodeMs:prev.decodeMs*0.7+decodeMs*0.3,scanDelayMs:scanDelayRef.current}));
-      detectedWindowRef.current={started:now,count:0};
-    }
-    if(foundCount===0) nativeMissRef.current+=1;
-    else nativeMissRef.current=0;
-    if(nativeMissRef.current>=4){ startFallbackDecoder(); return; }
-    if(decodeMs>60)scanDelayRef.current=Math.min(140,Math.max(scanDelayRef.current,Math.round(decodeMs*0.9)));
-    else if(foundCount>0)scanDelayRef.current=Math.max(20,scanDelayRef.current-5);
-    else scanDelayRef.current=Math.min(80,scanDelayRef.current+2);
-    if(receivingRef.current && !fallbackActiveRef.current)window.setTimeout(()=>void scanLoop(),scanDelayRef.current);
   }
 
   async function startReceive(){
