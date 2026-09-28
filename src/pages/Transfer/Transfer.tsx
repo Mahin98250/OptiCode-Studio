@@ -105,6 +105,7 @@ export function Transfer() {
   const nativeSlowRef=useRef(0);
   const fallbackLoopRef=useRef<number|null>(null);
   const fallbackActiveRef=useRef(false);
+  const zxingFallbackTimerRef=useRef<number|null>(null);
 
   useEffect(()=>{
     try{
@@ -375,6 +376,7 @@ export function Transfer() {
     qrPoolRef.current=null;
     if(benchmarkTimerRef.current!==null){window.clearTimeout(benchmarkTimerRef.current);benchmarkTimerRef.current=null;}
     if(fallbackLoopRef.current!==null){window.clearTimeout(fallbackLoopRef.current);fallbackLoopRef.current=null;}
+    if(zxingFallbackTimerRef.current!==null){window.clearTimeout(zxingFallbackTimerRef.current);zxingFallbackTimerRef.current=null;}
     fallbackActiveRef.current=false;
     nativeMissRef.current=0;
     nativeSlowRef.current=0;
@@ -660,6 +662,7 @@ export function Transfer() {
         zxingReaderRef.current=reader;
         const controls=await reader.decodeFromVideoElement(videoRef.current,(result)=>{
           if(!receivingRef.current || !result)return;
+          if(zxingFallbackTimerRef.current!==null){window.clearTimeout(zxingFallbackTimerRef.current);zxingFallbackTimerRef.current=null;}
           const now=performance.now();
           if(receiverStartedRef.current===null)receiverStartedRef.current=now;
           if(detectedWindowRef.current.started===0)detectedWindowRef.current.started=now;
@@ -677,6 +680,16 @@ export function Transfer() {
         });
         zxingControlsRef.current=controls;
         zxingStarted=true;
+        // Do not let a silent decoder failure stall the prototype forever.
+        // Give ZXing a few seconds to acquire a real QR, then switch to the
+        // existing worker decoder automatically if nothing has been detected.
+        zxingFallbackTimerRef.current=window.setTimeout(()=>{
+          if(!receivingRef.current || fallbackActiveRef.current)return;
+          try{ zxingControlsRef.current?.stop(); }catch{}
+          zxingControlsRef.current=null;
+          zxingReaderRef.current=null;
+          startFallbackDecoder();
+        },5000);
       }catch{
         zxingStarted=false;
       }
