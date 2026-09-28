@@ -120,6 +120,8 @@ export function Transfer() {
   const fallbackLoopRef=useRef<number|null>(null);
   const fallbackActiveRef=useRef(false);
   const zxingFallbackTimerRef=useRef<number|null>(null);
+  const decodeMaxDimensionRef=useRef(1120);
+  const noDetectionDecodeCountRef=useRef(0);
 
   useEffect(()=>{
     try{
@@ -576,7 +578,11 @@ export function Transfer() {
       }
 
       if(sourceWidth && sourceHeight){
-        const maxDimension=1280;
+        // Start below the full camera resolution to keep jsQR responsive on
+        // phones. If acquisition fails repeatedly, temporarily raise the
+        // decode resolution; once a QR is found, immediately return to the
+        // cheaper baseline. This trades idle CPU for extra optical margin.
+        const maxDimension=decodeMaxDimensionRef.current;
         const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
         const width=Math.max(1,Math.round(sourceWidth*scale));
         const height=Math.max(1,Math.round(sourceHeight*scale));
@@ -590,13 +596,28 @@ export function Transfer() {
         // multiple workers, so keep feeding fresh frames while workers are busy.
         // This changes the receiver from "one decode at a time" to a pipelined
         // acquisition loop without changing the transfer protocol.
+        // Do not spend CPU copying camera frames when every decoder worker is
+        // already occupied. Wait for a worker to free up instead.
+        if(qrPoolRef.current.available<0){
+          fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(18,Math.min(40,scanDelayRef.current)));
+          return;
+        }
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,1);
         if(job){
           decoderCallsRef.current+=1;
           void job.then(async decoded=>{
             const processStarted=performance.now();
             qrDetectionsRef.current+=decoded.values.length;
-            if(decoded.values.length>0) lastDetectionRef.current=decoded.values[0].slice(0,48);
+            if(decoded.values.length>0){
+              lastDetectionRef.current=decoded.values[0].slice(0,48);
+              noDetectionDecodeCountRef.current=0;
+              decodeMaxDimensionRef.current=1120;
+            }else{
+              noDetectionDecodeCountRef.current+=1;
+              if(noDetectionDecodeCountRef.current>=10){
+                decodeMaxDimensionRef.current=1280;
+              }
+            }
 
             await Promise.all(decoded.values.map(value=>processValue(value)));
 
@@ -693,6 +714,8 @@ export function Transfer() {
     receiverStartedRef.current=null;solvedRef.current=0;duplicateCountRef.current=0;
     detectedWindowRef.current={started:0,count:0};scanDelayRef.current=55;
     cameraFramesRef.current=0;decoderCallsRef.current=0;qrDetectionsRef.current=0;acceptedTransferFramesRef.current=0;lastDetectionRef.current='—';telemetryTickRef.current=0;
+    decodeMaxDimensionRef.current=1120;
+    noDetectionDecodeCountRef.current=0;
     nativeMissRef.current=0;nativeSlowRef.current=0;fallbackActiveRef.current=false;
     setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,lastDetection:'—'}));
 
