@@ -738,7 +738,6 @@ export function Transfer() {
     }
     if(isTransferFrame(value)){
       const frame=parseTransferFrame(value); if(!frame)return;
-      acceptedTransferFramesRef.current+=1;
       if(compatibilitySessionRef.current && compatibilitySessionRef.current !== frame.session){
         decodedBytesRef.current=0;
         setProgress(null);
@@ -746,6 +745,7 @@ export function Transfer() {
       compatibilitySessionRef.current=frame.session;
       const sessionAtStart=frame.session;
       const added=await addTransferFrame(frame);
+      acceptedTransferFramesRef.current+=1;
       // A newer optical session can arrive while IndexedDB is committing this
       // frame. Do not let an older in-flight promise overwrite the new session's
       // progress or trigger reconstruction for the wrong transfer.
