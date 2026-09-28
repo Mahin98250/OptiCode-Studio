@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
+import { BrowserQRCodeReader } from '@zxing/browser';
 import { Activity, CheckCircle2, Download, FileUp, Gauge, LockKeyhole, Radio, ScanLine, ShieldCheck, TimerReset, WifiOff } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { QrDecodePool } from '../../lib/qrDecodePool';
@@ -34,7 +35,18 @@ type Telemetry = {
   transferFrames:number;
   nativeCalls:number;
   nativeAssist:boolean;
+  zxingCalls:number;
+  zxingAssist:boolean;
   lastDetection:string;
+};
+
+type ZxingReader = {
+  decodeFromVideoElementContinuously(
+    source:HTMLVideoElement,
+    callback:(result:{getText:()=>string}|null,error?:unknown)=>unknown,
+  ):Promise<unknown>;
+  stopContinuousDecode:()=>void;
+  reset:()=>void;
 };
 
 type NativeQrDetector = {
@@ -77,6 +89,7 @@ export function Transfer() {
   const playbackRafRef=useRef<number|null>(null);
   const playbackLastAtRef=useRef(0);
   const playbackGroupRef=useRef(0);
+  const playbackRepeatRef=useRef(0);
   const playbackPlanKeyRef=useRef<string | null>(null);
   const playbackFountainRef=useRef(false);
   const playbackPrefetchRef=useRef<Set<string>>(new Set());
@@ -118,9 +131,22 @@ export function Transfer() {
   const nativeInFlightRef=useRef(false);
   const nativeDetectorRef=useRef<NativeQrDetector|null>(null);
   const nativeCallsRef=useRef(0);
+  const zxingReaderRef=useRef<ZxingReader|null>(null);
+  const zxingActiveRef=useRef(false);
+  const zxingCallsRef=useRef(0);
   const [probeStatus,setProbeStatus]=useState('Not run');
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
+
+  function getOpticalCanvasSize(canvas:HTMLCanvasElement){
+    const cssWidth=Math.max(280,Math.floor(canvas.getBoundingClientRect().width || canvas.clientWidth || window.innerWidth));
+    const dpr=Math.min(3,Math.max(1,window.devicePixelRatio||1));
+    return Math.min(1800,Math.max(720,Math.round(cssWidth*dpr)));
+  }
+
+  async function enterTransferFullscreen(){
+    try{ await qrCanvasRef.current?.requestFullscreen?.(); }catch{}
+  }
 
   useEffect(()=>{
     try{
@@ -194,8 +220,16 @@ export function Transfer() {
             const cacheKey=planKey+':'+nextGroup;
             const cached=renderCacheRef.current.get(cacheKey);
             if(cached) {
-              drawQrMatricesToCanvas(qrCanvasRef.current,cached.matrices,1400,18);
-              playbackGroupRef.current+=1;
+              drawQrMatricesToCanvas(qrCanvasRef.current,cached.matrices,getOpticalCanvasSize(qrCanvasRef.current),18);
+              if(fountainMode){
+                playbackGroupRef.current+=1;
+              }else{
+                playbackRepeatRef.current+=1;
+                if(playbackRepeatRef.current>=2){
+                  playbackRepeatRef.current=0;
+                  playbackGroupRef.current+=1;
+                }
+              }
             } else if(!playbackPrefetchRef.current.has(cacheKey)) {
               playbackPrefetchRef.current.add(cacheKey);
               void buildRenderGroup(planKey,plan,nextGroup,fountainMode)
@@ -299,7 +333,7 @@ export function Transfer() {
         if(cancelled || epoch!==renderEpochRef.current)return;
         if(display){
           renderCountRef.current+=1;
-          if(qrCanvasRef.current && !playing) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,1400,18);
+          if(qrCanvasRef.current && !playing) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,getOpticalCanvasSize(qrCanvasRef.current),18);
           const now=performance.now();
           if(renderWindowStatsRef.current.started===0)renderWindowStatsRef.current.started=now;
           renderWindowStatsRef.current.count+=1;
@@ -365,7 +399,8 @@ export function Transfer() {
     try{
       const entry=await buildRenderGroup(planKey,plan,0,fountainMode);
       if(playbackPlanKeyRef.current!==planKey) return;
-      if(qrCanvasRef.current) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,1400,18);
+      if(qrCanvasRef.current) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,getOpticalCanvasSize(qrCanvasRef.current),18);
+      playbackRepeatRef.current=0;
       setPlaying(true);
     }catch(error){
       setError(error instanceof Error?error.message:'Unable to start the optical stream.');
@@ -375,6 +410,7 @@ export function Transfer() {
   function stopPlayback(){
     setPlaying(false);
     playbackGroupRef.current=0;
+    playbackRepeatRef.current=0;
     void setScreenWakeLock(false);
     if(playbackRafRef.current!==null){
       window.cancelAnimationFrame(playbackRafRef.current);
@@ -386,6 +422,10 @@ export function Transfer() {
     receivingRef.current=false;
     streamRef.current?.getTracks().forEach(t=>t.stop());
     streamRef.current=null;
+    try{zxingReaderRef.current?.stopContinuousDecode();}catch{}
+    try{zxingReaderRef.current?.reset();}catch{}
+    zxingReaderRef.current=null;
+    zxingActiveRef.current=false;
     void setScreenWakeLock(false);
     qrPoolRef.current?.terminate();
     qrPoolRef.current=null;
@@ -397,6 +437,47 @@ export function Transfer() {
     nativeInFlightRef.current=false;
     nativeDetectorRef.current=null;
     setReceiving(false);
+  }
+
+  async function startZxingAssist(){
+    if(!receivingRef.current || !videoRef.current)return false;
+    try{
+      const reader=new BrowserQRCodeReader() as unknown as ZxingReader & {timeBetweenDecodingAttempts?:number};
+      reader.timeBetweenDecodingAttempts=450;
+      zxingReaderRef.current=reader;
+      zxingActiveRef.current=true;
+      zxingCallsRef.current=0;
+      setTelemetry(prev=>({...prev,zxingAssist:true,zxingCalls:0}));
+
+      const video=videoRef.current;
+      void reader.decodeFromVideoElementContinuously(video,(result)=>{
+        if(!receivingRef.current || !zxingActiveRef.current)return;
+        zxingCallsRef.current+=1;
+        if(!result)return;
+        const value=result.getText();
+        if(!value)return;
+        qrDetectionsRef.current+=1;
+        lastDetectionRef.current=value.slice(0,48);
+        noDetectionDecodeCountRef.current=0;
+        void processValue(value);
+        setTelemetry(prev=>({...prev,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,zxingCalls:zxingCallsRef.current,lastDetection:lastDetectionRef.current}));
+      }).catch(error=>{
+        if(!receivingRef.current)return;
+        zxingActiveRef.current=false;
+        zxingReaderRef.current=null;
+        setTelemetry(prev=>({...prev,zxingAssist:false,zxingCalls:zxingCallsRef.current}));
+        if(error instanceof Error && /camera|stream|video/i.test(error.message)){
+          setError('ZXing camera assist stopped: '+error.message);
+        }
+      });
+
+      return true;
+    }catch{
+      zxingReaderRef.current=null;
+      zxingActiveRef.current=false;
+      setTelemetry(prev=>({...prev,zxingAssist:false,zxingCalls:zxingCallsRef.current}));
+      return false;
+    }
   }
 
   async function startNativeQrAssist(){
@@ -840,10 +921,13 @@ export function Transfer() {
     noDetectionDecodeCountRef.current=0;
     nativeCallsRef.current=0;
     nativeInFlightRef.current=false;
+    zxingCallsRef.current=0;
+    zxingActiveRef.current=false;
+    zxingReaderRef.current=null;
     fallbackActiveRef.current=false;
     nativeActiveRef.current=false;
     setProbeStatus('Not run');
-    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,nativeCalls:0,nativeAssist:false,lastDetection:'—'}));
+    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,nativeCalls:0,nativeAssist:false,zxingCalls:0,zxingAssist:false,lastDetection:'—'}));
 
     try{
       if(!window.isSecureContext){
@@ -905,6 +989,7 @@ export function Transfer() {
           await track.applyConstraints({advanced:[{focusMode:'continuous'}]} as unknown as MediaTrackConstraints).catch(()=>{});
         }
       }catch{}
+      await startZxingAssist();
       await startNativeQrAssist();
       startFallbackDecoder();
     }catch(e){
@@ -943,19 +1028,20 @@ export function Transfer() {
       </div>
       <div className="glass-panel rounded-[28px] p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-cyan-300">Live optical stream</p><p className="mt-1 text-sm text-[var(--text-muted)]">{fountain?'MVP fountain stream · systematic + recovery droplets':compat?'Sequential compatibility stream':'Choose a file to begin'}</p></div>{(fountain||compat)&&<button onClick={()=>{if(playing)stopPlayback();else void startPlayback();}} className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950">{playing?'Pause':'Start stream'}</button>}</div>
-        {(fountain||compat)?<canvas ref={qrCanvasRef} width={900} height={900} aria-label="OptiTransfer QR stream" className="transfer-canvas mx-auto mt-5 aspect-square w-full max-w-[760px] min-h-[min(72vh,760px)] rounded-2xl bg-white p-1 sm:p-2"/>:<div className="mt-5 grid aspect-square place-items-center rounded-2xl bg-black/20 text-sm text-[var(--text-muted)]">QR stream preview</div>}
+        {(fountain||compat)?<canvas ref={qrCanvasRef} width={900} height={900} aria-label="OptiTransfer QR stream" className="transfer-canvas mx-auto mt-5 aspect-square w-full max-w-[760px] min-h-[min(72vh,760px)] rounded-2xl bg-white p-1 sm:p-2" style={{imageRendering:'crisp-edges'}}/>:<div className="mt-5 grid aspect-square place-items-center rounded-2xl bg-black/20 text-sm text-[var(--text-muted)]">QR stream preview</div>}
         {(fountain||compat)&&<div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Auto tune<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On · render-safe</option><option value="off">Off · manual</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="500">500 ms · slow reliable</option><option value="700">700 ms · MVP default</option><option value="1000">1000 ms · maximum acquisition margin</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Engine</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Render</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Payload</b><p className="mt-1 text-[var(--text-muted)]">{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':'525 raw bytes/frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Display lanes</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · MVP keeps mobile transfer at one physical lane</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Recovery</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Fountain':'Sequential'}</p></div></div>}
+          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Auto tune<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On · render-safe</option><option value="off">Off · manual</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="500">500 ms · slow reliable</option><option value="700">700 ms · MVP default</option><option value="1000">1000 ms · maximum acquisition margin</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Engine</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Render</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Payload</b><p className="mt-1 text-[var(--text-muted)]">{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':'225 raw bytes/frame · 2× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Display lanes</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · MVP keeps mobile transfer at one physical lane</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Recovery</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Fountain':'Sequential'}</p></div></div>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
-      <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-cover sm:min-h-[560px]"/><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving)stopReceive();else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning multi-QR':'Camera idle'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Benchmark 1 MB'}</button>}</div></div>
+      <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><div className="relative overflow-hidden rounded-2xl bg-black"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-contain sm:min-h-[560px]"/>{receiving&&<div className="pointer-events-none absolute inset-0 grid place-items-center"><div className="relative aspect-square w-[72%] max-w-[560px] rounded-[28px] border-2 border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]"><span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/65 px-3 py-1 text-[10px] font-bold text-white">ALIGN QR INSIDE FRAME</span></div></div>}</div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving)stopReceive();else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning multi-QR':'Camera idle'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Benchmark 1 MB'}</button>}</div></div>
       <div className="transfer-receiver-panel glass-panel rounded-[28px] p-5"><LockKeyhole size={20} className="text-cyan-300"/><p className="mt-3 font-bold">Loss-tolerant receiver</p><p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">MVP receiver uses a continuous camera-frame worker immediately. It reports camera frames, decoder calls, QR hits, and accepted ORX1 frames separately so failures are diagnosable.</p><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><Activity size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Camera</p><p className="mt-1 text-sm font-black">{telemetry.cameraFrames}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">video frames</p></div>
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><ScanLine size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">QR hits</p><p className="mt-1 text-sm font-black">{telemetry.qrDetections}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.detectedPerSecond.toFixed(1)}/s</p></div>
           <div className="rounded-2xl bg-white/5 p-3"><TimerReset size={16} className="text-white/70"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Decoder</p><p className="mt-1 text-sm font-black">{telemetry.decodeMs.toFixed(0)} ms</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.decoderCalls} jsQR calls · {telemetry.nativeAssist?'native QR assist':'worker-only'}</p></div>
           <div className="rounded-2xl bg-white/5 p-3"><ShieldCheck size={16} className="text-emerald-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">ORX1 accepted</p><p className="mt-1 text-sm font-black">{telemetry.transferFrames}</p><p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">{telemetry.lastDetection}</p></div>
         </div>
-        <div className="mt-3 rounded-2xl bg-white/5 p-3 text-[10px] leading-5 text-[var(--text-muted)]"><span className="font-bold text-white/80">Acquisition:</span> camera {telemetry.cameraFrames>0?'✓':'…'} → decoder {telemetry.decoderCalls>0?'✓':'…'} → QR {telemetry.qrDetections>0?'✓':'…'} → ORX1 {telemetry.transferFrames>0?'✓':'…'} · native QR: {telemetry.nativeAssist?'ON':'unavailable'} ({telemetry.nativeCalls}) · last: {telemetry.lastDetection}</div>
+        <div className="mt-3 rounded-2xl bg-white/5 p-3 text-[10px] leading-5 text-[var(--text-muted)]"><span className="font-bold text-white/80">Acquisition:</span> camera {telemetry.cameraFrames>0?'✓':'…'} → decoder {telemetry.decoderCalls>0?'✓':'…'} → QR {telemetry.qrDetections>0?'✓':'…'} → ORX1 {telemetry.transferFrames>0?'✓':'…'} · ZXing: {telemetry.zxingAssist?'ON':'unavailable'} ({telemetry.zxingCalls}) · native QR: {telemetry.nativeAssist?'ON':'unavailable'} ({telemetry.nativeCalls}) · last: {telemetry.lastDetection}</div>
+{receiving&&<div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl bg-white/5 p-3 text-[10px] text-[var(--text-muted)]"><button onClick={()=>{void enterTransferFullscreen();}} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 font-bold text-cyan-200">Fullscreen QR</button><button onClick={()=>{void probeLiveCameraFrame();}} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 font-bold text-cyan-200">Probe live camera frame</button><span>Full + center QR diagnostic.</span><span className="font-bold text-white/80">{probeStatus}</span></div>}
         {receiving&&<div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl bg-white/5 p-3 text-[10px] text-[var(--text-muted)]"><button onClick={()=>{void probeLiveCameraFrame();}} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 font-bold text-cyan-200">Probe live camera frame</button><span>Exact live-video pixels: full-frame + centered-square jsQR.</span><span className="font-bold text-white/80">{probeStatus}</span></div>}
         {benchmark&&<div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.05] p-4"><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold uppercase tracking-[.14em] text-cyan-200">Physical 1 MB benchmark</p><span className="text-[10px] text-[var(--text-muted)]">{(benchmark.durationMs/1000).toFixed(1)} s</span></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"><div><p className="text-[10px] text-[var(--text-muted)]">Sustained</p><p className="text-sm font-black">{benchmark.goodputKbps.toFixed(1)} KB/s</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Peak ≥1s</p><p className="text-sm font-black">{benchmark.peakGoodputKbps.toFixed(1)} KB/s</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Codes/sec</p><p className="text-sm font-black">{benchmark.sustainedDecodeRate.toFixed(1)} / {benchmark.peakDecodeRate.toFixed(1)}</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Unique codes</p><p className="text-sm font-black">{benchmark.uniqueCodes}</p></div></div><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-xl bg-white/5 p-3"><p className="text-[10px] text-[var(--text-muted)]">Decimen desktop→phone reference</p><p className="mt-1 text-xs font-bold">418.5 KB/s sustained · 601.5 KB/s peak</p></div><div className="rounded-xl bg-white/5 p-3"><p className="text-[10px] text-[var(--text-muted)]">Decimen phone→phone reference</p><p className="mt-1 text-xs font-bold">199.2 KB/s sustained · 340.8 KB/s peak</p></div></div><p className="mt-3 text-[10px] leading-5 text-[var(--text-muted)]">Run this on the actual device pair. The result is a measurement, not a simulated claim. To establish a “better than Decimen” result, repeat the same 1 MB, 10-second methodology on a comparable device pair and compare sustained and ≥1-second peak goodput.</p></div>}{progress&&<div className="mt-5 rounded-2xl bg-white/5 p-4"><p className="truncate text-sm font-bold">{progress.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{progress.mode==='fountain'?`${progress.received.toLocaleString()} unique droplets · ${progress.total.toLocaleString()} source blocks`:progress.mode==='multi-image'?`${progress.received} / ${progress.total} image frames`:`${progress.received} / ${progress.total} frames`}</p><div className="mt-3 h-2 rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all" style={{width:`${Math.min(100,Math.round(progress.received/progress.total*100))}%`}}/></div></div>}{result&&<div className="mt-5 rounded-2xl bg-emerald-400/10 p-4"><CheckCircle2 className="text-emerald-300"/><p className="mt-2 font-bold">File reconstructed & verified</p><p className="mt-1 truncate text-xs text-[var(--text-muted)]">{result.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{(result.size/1024/1024).toFixed(2)} MB · SHA-256 verified</p><a href={result.url} download={result.name} className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-slate-950"><Download size={14}/> Save file</a></div>}{error&&<p className="mt-5 rounded-2xl bg-rose-400/10 p-4 text-sm text-rose-200">{error}</p>}</div>
     </div>}
