@@ -75,7 +75,7 @@ function decode(request:DecodeRequest):DecodeResult{
       const crop=scratch.subarray(0,required);
       const fast=jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'dontInvert'})?.data;
       if(fast) add(fast);
-      else add(jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'attemptBoth'})?.data);
+      else if(maxDepth>=1) add(jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'attemptBoth'})?.data);
     }catch{
       // A single bad region must never kill the camera loop.
     }
