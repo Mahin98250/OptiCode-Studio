@@ -12,7 +12,14 @@ function drawMatrixToCanvas(
   size: number,
   margin = 16,
 ) {
-  const cell = (size - margin * 2) / matrix.size;
+  // Preserve the QR quiet zone at four modules. A fixed pixel margin
+  // becomes too narrow for the larger QR versions used by transfer frames.
+  const fourModuleMargin = Math.ceil((4 * size) / (matrix.size + 8));
+  const safeMargin = Math.min(
+    Math.max(margin, fourModuleMargin),
+    Math.max(1, Math.floor(size / 2) - 1),
+  );
+  const cell = (size - safeMargin * 2) / matrix.size;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(x, y, size, size);
   ctx.fillStyle = '#000000';
@@ -21,10 +28,10 @@ function drawMatrixToCanvas(
     for (let col = 0; col < matrix.size; col += 1) {
       const index = row * matrix.size + col;
       if (!matrix.data[index]) continue;
-      const left = x + margin + Math.floor(col * cell);
-      const top = y + margin + Math.floor(row * cell);
-      const right = x + margin + Math.floor((col + 1) * cell);
-      const bottom = y + margin + Math.floor((row + 1) * cell);
+      const left = x + safeMargin + Math.floor(col * cell);
+      const top = y + safeMargin + Math.floor(row * cell);
+      const right = x + safeMargin + Math.floor((col + 1) * cell);
+      const bottom = y + safeMargin + Math.floor((row + 1) * cell);
       ctx.fillRect(left, top, Math.max(1, right - left), Math.max(1, bottom - top));
     }
   }
