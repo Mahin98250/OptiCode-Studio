@@ -52,13 +52,13 @@ export function Transfer() {
   const [compat,setCompat]=useState<Awaited<ReturnType<typeof createTransfer>>|null>(null);
   const [group,setGroup]=useState(0);
   const [playing,setPlaying]=useState(false);
-  const [intervalMs,setIntervalMs]=useState(180);
+  const [intervalMs,setIntervalMs]=useState(700);
   const [error,setError]=useState('');
   const [receiving,setReceiving]=useState(false);
   const [progress,setProgress]=useState<Progress|null>(null);
   const [result,setResult]=useState<Result|null>(null);
   const [compatMissing,setCompatMissing]=useState<number|null>(null);
-  const [autoTune,setAutoTune]=useState(true);
+  const [autoTune,setAutoTune]=useState(false);
   const [benchmarking,setBenchmarking]=useState(false);
   const [benchmark,setBenchmark]=useState<OpticalBenchmark|null>(null);
   const [telemetry,setTelemetry]=useState<Telemetry>({startedAt:null,renderMs:0,encodeMs:0,prefetchReady:0,encoderWorkers:0,renderCount:0,renderFps:0,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55});
@@ -67,6 +67,8 @@ export function Transfer() {
   const videoRef=useRef<HTMLVideoElement>(null);
   const streamRef=useRef<MediaStream|null>(null);
   const detectorRef=useRef<Detector|null>(null);
+  const zxingReaderRef=useRef<BrowserQRCodeReader|null>(null);
+  const zxingControlsRef=useRef<{stop:()=>void}|null>(null);
   const receivingRef=useRef(false);
   const fallbackCanvasRef=useRef<HTMLCanvasElement|null>(null);
   const qrPoolRef=useRef<QrDecodePool|null>(null);
