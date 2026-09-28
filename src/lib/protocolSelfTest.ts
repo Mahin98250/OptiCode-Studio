@@ -444,7 +444,7 @@ async function qrTransferFrameWorkerDiagnostic() {
   assert(parsed.data.length === OR_TRANSFER_CHUNK_CHARS, 'Compatibility fixture did not reach the configured encoded payload budget.');
 
   const canvas = document.createElement('canvas');
-  drawQrMatricesToCanvas(canvas, createQrMatrices([raw]), 900, 18);
+  drawQrMatricesToCanvas(canvas, createQrMatrices([raw]), 720, 18);
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   assert(ctx, 'Compatibility QR diagnostic canvas context unavailable.');
 
@@ -455,7 +455,7 @@ async function qrTransferFrameWorkerDiagnostic() {
     assert(result, 'Compatibility QR worker returned no result.');
     assert(result.values.includes(raw), 'QR worker failed to recover the exact long ORX1 payload.');
     assert(result.regionsScanned === 1, 'Fast compatibility QR path scanned ' + result.regionsScanned + ' regions instead of 1.');
-    return 'Exact ORX1 frame · ' + raw.length + ' chars · ' + parsed.data.length + ' encoded data chars · fast 1-region worker decode';
+    return 'Exact ORX1 frame · ' + raw.length + ' chars · ' + parsed.data.length + ' encoded data chars · 720px runtime-sized 1-region worker decode';
   } finally {
     pool.terminate();
   }
