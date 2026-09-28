@@ -715,7 +715,7 @@ export function Transfer() {
       try{
         const track=stream.getVideoTracks()[0];
         if(track?.applyConstraints){
-          await track.applyConstraints({advanced:[{focusMode:'continuous'}]} as MediaTrackConstraints).catch(()=>{});
+          await track.applyConstraints({advanced:[{focusMode:'continuous'}]} as unknown as MediaTrackConstraints).catch(()=>{});
         }
       }catch{}
       startFallbackDecoder();
