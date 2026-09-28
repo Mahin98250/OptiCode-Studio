@@ -76,6 +76,7 @@ export function Transfer() {
   const zxingControlsRef=useRef<{stop:()=>void}|null>(null);
   const receivingRef=useRef(false);
   const fallbackCanvasRef=useRef<HTMLCanvasElement|null>(null);
+  const recoveryCanvasRef=useRef<HTMLCanvasElement|null>(null);
   const qrPoolRef=useRef<QrDecodePool|null>(null);
   const timerRef=useRef<number|null>(null);
   const playbackRafRef=useRef<number|null>(null);
@@ -557,8 +558,11 @@ export function Transfer() {
     nativeMissRef.current=0;
     const canvas=fallbackCanvasRef.current ?? document.createElement('canvas');
     fallbackCanvasRef.current=canvas;
+    const recoveryCanvas=recoveryCanvasRef.current ?? document.createElement('canvas');
+    recoveryCanvasRef.current=recoveryCanvas;
     const ctx=canvas.getContext('2d',{willReadFrequently:true});
-    if(!ctx){ setError('Camera fallback decoder could not create an image surface.'); stopReceive(); return; }
+    const recoveryCtx=recoveryCanvas.getContext('2d',{willReadFrequently:true});
+    if(!ctx || !recoveryCtx){ setError('Camera fallback decoder could not create an image surface.'); stopReceive(); return; }
     let pool:QrDecodePool;
     try{
       pool=qrPoolRef.current ?? new QrDecodePool();
@@ -584,35 +588,49 @@ export function Transfer() {
       }
 
       if(sourceWidth && sourceHeight){
-        // Start below the full camera resolution to keep jsQR responsive on
-        // phones. If acquisition fails repeatedly, temporarily raise the
-        // decode resolution; once a QR is found, immediately return to the
-        // cheaper baseline. This trades idle CPU for extra optical margin.
-        const maxDimension=decodeMaxDimensionRef.current;
-        const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
-        const width=Math.max(1,Math.round(sourceWidth*scale));
-        const height=Math.max(1,Math.round(sourceHeight*scale));
-        if(canvas.width!==width)canvas.width=width;
-        if(canvas.height!==height)canvas.height=height;
-        ctx.imageSmoothingEnabled=false;
-        ctx.drawImage(video,0,0,width,height);
-        const image=ctx.getImageData(0,0,width,height);
+        // Baseline: decode the complete camera image at a moderate resolution.
+        // Recovery: after repeated misses, every other sample is a centered square
+        // crop. The sender renders a square QR, while many phone camera streams are
+        // 16:9, so the crop concentrates pixels on the optical payload.
+        const misses=noDetectionDecodeCountRef.current;
+        const useCenterRecovery=misses>=3 && misses%2===0;
+
+        let image:ImageData;
+        let width:number;
+        let height:number;
+
+        if(useCenterRecovery){
+          const cropSize=Math.min(sourceWidth,sourceHeight);
+          const scale=Math.max(1,1120/cropSize);
+          width=Math.max(1,Math.round(cropSize*scale));
+          height=width;
+          if(recoveryCanvas.width!==width)recoveryCanvas.width=width;
+          if(recoveryCanvas.height!==height)recoveryCanvas.height=height;
+          recoveryCtx.imageSmoothingEnabled=false;
+          const sx=Math.floor((sourceWidth-cropSize)/2);
+          const sy=Math.floor((sourceHeight-cropSize)/2);
+          recoveryCtx.drawImage(video,sx,sy,cropSize,cropSize,0,0,width,height);
+          image=recoveryCtx.getImageData(0,0,width,height);
+        }else{
+          const maxDimension=decodeMaxDimensionRef.current;
+          const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
+          width=Math.max(1,Math.round(sourceWidth*scale));
+          height=Math.max(1,Math.round(sourceHeight*scale));
+          if(canvas.width!==width)canvas.width=width;
+          if(canvas.height!==height)canvas.height=height;
+          ctx.imageSmoothingEnabled=false;
+          ctx.drawImage(video,0,0,width,height);
+          image=ctx.getImageData(0,0,width,height);
+        }
 
         // Do not serialize camera capture behind a slow QR decode. The pool has
         // multiple workers, so keep feeding fresh frames while workers are busy.
-        // This changes the receiver from "one decode at a time" to a pipelined
-        // acquisition loop without changing the transfer protocol.
-        // Do not spend CPU copying camera frames when every decoder worker is
-        // already occupied. Wait for a worker to free up instead.
         if(qrPoolRef.current.available<0){
           fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(18,Math.min(40,scanDelayRef.current)));
           return;
         }
-        // Most frames should be cheap full-frame scans. Only enable the
-        // four-quadrant recovery pass after consecutive misses; this keeps
-        // normal acquisition fast while preserving a deterministic recovery
-        // path when the QR is small or partially framed.
-        const decodeDepth=noDetectionDecodeCountRef.current>=3?1:0;
+        // Only pay for quadrant recovery after sustained misses.
+        const decodeDepth=misses>=6?1:0;
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth);
         if(job){
           decoderCallsRef.current+=1;
