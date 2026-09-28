@@ -146,12 +146,16 @@ export function Transfer() {
   }
 
   useEffect(()=>{
-    if(!playing) return;
+    if(!playing && !receiving) return;
     void setScreenWakeLock(true);
-    const onVisibility=()=>{ if(document.visibilityState==='visible' && playing) void setScreenWakeLock(true); };
+    const onVisibility=()=>{
+      if(document.visibilityState==='visible' && (playing || receiving)){
+        void setScreenWakeLock(true);
+      }
+    };
     document.addEventListener('visibilitychange',onVisibility);
     return()=>document.removeEventListener('visibilitychange',onVisibility);
-  },[playing]);
+  },[playing,receiving]);
 
   useEffect(()=>{
     if(!playing) return;
