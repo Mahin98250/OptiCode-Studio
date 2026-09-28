@@ -602,7 +602,12 @@ export function Transfer() {
           fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(18,Math.min(40,scanDelayRef.current)));
           return;
         }
-        const job=qrPoolRef.current.decode(image.data.buffer,width,height,1);
+        // Most frames should be cheap full-frame scans. Only enable the
+        // four-quadrant recovery pass after consecutive misses; this keeps
+        // normal acquisition fast while preserving a deterministic recovery
+        // path when the QR is small or partially framed.
+        const decodeDepth=noDetectionDecodeCountRef.current>=3?1:0;
+        const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth);
         if(job){
           decoderCallsRef.current+=1;
           void job.then(async decoded=>{
