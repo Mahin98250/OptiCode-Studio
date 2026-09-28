@@ -375,7 +375,6 @@ export function Transfer() {
     if(fallbackLoopRef.current!==null){window.clearTimeout(fallbackLoopRef.current);fallbackLoopRef.current=null;}
     fallbackActiveRef.current=false;
     setReceiving(false);
-    if(zxingFallbackTimerRef.current!==null){window.clearTimeout(zxingFallbackTimerRef.current);zxingFallbackTimerRef.current=null;}
   }
   function resetDecoder(){
     fountainDecoderRef.current=null;
@@ -528,7 +527,6 @@ export function Transfer() {
   function startFallbackDecoder(){
     if(!receivingRef.current || fallbackActiveRef.current || !videoRef.current) return;
     fallbackActiveRef.current=true;
-    nativeMissRef.current=0;
     const canvas=fallbackCanvasRef.current ?? document.createElement('canvas');
     fallbackCanvasRef.current=canvas;
     const recoveryCanvas=recoveryCanvasRef.current ?? document.createElement('canvas');
@@ -672,7 +670,7 @@ export function Transfer() {
     cameraFramesRef.current=0;decoderCallsRef.current=0;qrDetectionsRef.current=0;acceptedTransferFramesRef.current=0;lastDetectionRef.current='—';telemetryTickRef.current=0;
     decodeMaxDimensionRef.current=1120;
     noDetectionDecodeCountRef.current=0;
-    nativeMissRef.current=0;nativeSlowRef.current=0;fallbackActiveRef.current=false;
+    fallbackActiveRef.current=false;
     setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,lastDetection:'—'}));
 
     try{
