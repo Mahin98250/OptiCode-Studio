@@ -568,10 +568,13 @@ async function optiFrameMultiLaneRoundTrip() {
 
   const cache = createOptiFrameCanvasCache(2);
   const cachedPayload = new TextEncoder().encode('cache-fixture');
+  const differentPayload = new TextEncoder().encode('different-payload-with-the-same-sequence');
   const first = cache.get(cachedPayload, 5, 20);
   const second = cache.get(cachedPayload, 5, 20);
   assert(first === second, 'OptiFrame canvas cache did not reuse an encoded frame.');
-  assert(cache.size() === 1, 'OptiFrame canvas cache size did not stay bounded after reuse.');
+  const different = cache.get(differentPayload, 5, 20);
+  assert(different !== first, 'OptiFrame canvas cache returned a stale frame for a different payload sharing the same sequence.');
+  assert(cache.size() === 2, 'OptiFrame canvas cache size did not account for distinct payloads sharing a sequence.');
   cache.get(cachedPayload, 6, 20);
   cache.get(cachedPayload, 7, 20);
   assert(cache.size() === 2, 'OptiFrame canvas cache exceeded its configured bound.');
