@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import jsQR from 'jsqr';
 import { Activity, CheckCircle2, Download, FileUp, Gauge, LockKeyhole, Radio, ScanLine, ShieldCheck, TimerReset, WifiOff } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { QrDecodePool } from '../../lib/qrDecodePool';
@@ -31,7 +32,13 @@ type Telemetry = {
   decoderCalls:number;
   qrDetections:number;
   transferFrames:number;
+  nativeCalls:number;
+  nativeAssist:boolean;
   lastDetection:string;
+};
+
+type NativeQrDetector = {
+  detect(source:HTMLVideoElement):Promise<Array<{rawValue?:string;format?:string}>>;
 };
 
 function getDisplayLaneCount() {
@@ -58,7 +65,7 @@ export function Transfer() {
   const [autoTune,setAutoTune]=useState(false);
   const [benchmarking,setBenchmarking]=useState(false);
   const [benchmark,setBenchmark]=useState<OpticalBenchmark|null>(null);
-  const [telemetry,setTelemetry]=useState<Telemetry>({startedAt:null,renderMs:0,encodeMs:0,prefetchReady:0,encoderWorkers:0,renderCount:0,renderFps:0,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,lastDetection:'—'});
+  const [telemetry,setTelemetry]=useState<Telemetry>({startedAt:null,renderMs:0,encodeMs:0,prefetchReady:0,encoderWorkers:0,renderCount:0,renderFps:0,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,nativeCalls:0,nativeAssist:false,lastDetection:'—'});
   const [screenAwake,setScreenAwake]=useState(false);
   const inputRef=useRef<HTMLInputElement>(null);
   const videoRef=useRef<HTMLVideoElement>(null);
@@ -106,6 +113,12 @@ export function Transfer() {
   const wakeLockRef=useRef<WakeLockSentinel|null>(null);
   const fallbackLoopRef=useRef<number|null>(null);
   const fallbackActiveRef=useRef(false);
+  const nativeLoopRef=useRef<number|null>(null);
+  const nativeActiveRef=useRef(false);
+  const nativeInFlightRef=useRef(false);
+  const nativeDetectorRef=useRef<NativeQrDetector|null>(null);
+  const nativeCallsRef=useRef(0);
+  const [probeStatus,setProbeStatus]=useState('Not run');
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
 
