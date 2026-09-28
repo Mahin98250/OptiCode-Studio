@@ -384,6 +384,39 @@ async function qrEncoderWorkerDiagnostic() {
   }
 }
 
+async function qrTransferFrameWorkerDiagnostic() {
+  if (typeof Worker === 'undefined') return 'Worker API unavailable; physical camera path remains separately testable.';
+
+  // Exercise the exact compatibility sender payload instead of a short synthetic
+  // string. This catches QR-version/capacity problems a generic smoke test can miss.
+  const original = makeBytes(525, 219);
+  const file = new File([original], 'diagnostic-compatibility-525b.bin', { type: 'application/octet-stream' });
+  const plan = await createTransfer(file);
+  const raw = await plan.getFrame(1);
+
+  assert(raw.startsWith('ORX1:'), 'Compatibility sender did not emit an ORX1 frame.');
+  const parsed = parseTransferFrame(raw);
+  assert(parsed, 'Compatibility sender frame could not be parsed.');
+  assert(parsed.data.length === OR_TRANSFER_CHUNK_CHARS, 'Compatibility fixture did not reach the configured encoded payload budget.');
+
+  const canvas = document.createElement('canvas');
+  drawQrMatricesToCanvas(canvas, createQrMatrices([raw]), 900, 18);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  assert(ctx, 'Compatibility QR diagnostic canvas context unavailable.');
+
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pool = new QrDecodePool(1);
+  try {
+    const result = await pool.decode(image.data.buffer, image.width, image.height, 0);
+    assert(result, 'Compatibility QR worker returned no result.');
+    assert(result.values.includes(raw), 'QR worker failed to recover the exact long ORX1 payload.');
+    assert(result.regionsScanned === 1, 'Fast compatibility QR path scanned ' + result.regionsScanned + ' regions instead of 1.');
+    return 'Exact ORX1 frame · ' + raw.length + ' chars · ' + parsed.data.length + ' encoded data chars · fast 1-region worker decode';
+  } finally {
+    pool.terminate();
+  }
+}
+
 async function qrDecoderWorkerDiagnostic() {
   if (typeof Worker === 'undefined') return 'Worker API unavailable; native BarcodeDetector remains the primary scanner path.';
 
@@ -694,6 +727,7 @@ export async function runProtocolDiagnostics(
     ['OR Transfer · frame integrity', fountainFrameIntegrity],
     ['Performance · QR encoder worker', qrEncoderWorkerDiagnostic],
     ['Performance · QR decoder worker', qrDecoderWorkerDiagnostic],
+    ['Performance · exact ORX1 QR frame', qrTransferFrameWorkerDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
       return r.payloadBytes + ' payload bytes · ' + r.capacityBytes + ' byte capacity · CRC-32 verified';
