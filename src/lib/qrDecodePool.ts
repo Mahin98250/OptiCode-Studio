@@ -13,7 +13,7 @@ export class QrDecodePool{
   private readonly failed=new Set<number>();
   private nextId=1;
 
-  constructor(size=Math.min(2,Math.max(1,(navigator.hardwareConcurrency||2)-1))){
+  constructor(size=Math.min(2,Math.max(1,((typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 2)||2)-1))){
     const count=Math.max(1,Math.min(3,size));
     for(let i=0;i<count;i+=1){
       const worker=new Worker(new URL('../workers/qrDecoder.worker.ts',import.meta.url),{type:'module'});
@@ -59,7 +59,13 @@ export class QrDecodePool{
     this.busy.add(workerIndex);
     return new Promise((resolve,reject)=>{
       this.pending.set(id,{workerIndex,resolve,reject});
-      worker.postMessage({id,width,height,buffer,maxDepth},[buffer]);
+      try{
+        worker.postMessage({id,width,height,buffer,maxDepth},[buffer]);
+      }catch(error){
+        this.pending.delete(id);
+        this.busy.delete(workerIndex);
+        reject(error instanceof Error ? error : new Error('QR decoder worker could not accept the frame.'));
+      }
     });
   }
 
