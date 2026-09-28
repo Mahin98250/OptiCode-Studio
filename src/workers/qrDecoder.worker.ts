@@ -51,9 +51,19 @@ function decode(request:DecodeRequest):DecodeResult{
       // The full-frame region is already contiguous. Do not copy the entire
       // camera frame just to pass it to jsQR.
       if(x===0 && y===0 && clippedWidth===request.width && clippedHeight===request.height){
-        // OptiCode renders black modules on white. jsQR documents that
-        // attemptBoth costs roughly 50% extra work, so stay on dontInvert.
-        add(jsQR(data,request.width,request.height,{inversionAttempts:'attemptBoth'})?.data);
+        // Fast path: normal black-on-white QR first. jsQR documents that
+        // attemptBoth costs about 50% more work. Only pay that cost when the
+        // normal polarity fails.
+        const fast=jsQR(data,request.width,request.height,{inversionAttempts:'dontInvert'})?.data;
+        if(fast){
+          add(fast);
+          // Compatibility frames are the MVP's dominant one-QR path. Once a
+          // valid ORX1 frame is found in the full image, there is no reason to
+          // spend four more expensive quadrant scans on the same frame.
+          if(fast.startsWith('ORX1:')) return;
+        }else{
+          add(jsQR(data,request.width,request.height,{inversionAttempts:'attemptBoth'})?.data);
+        }
         return;
       }
 
@@ -65,7 +75,10 @@ function decode(request:DecodeRequest):DecodeResult{
         scratch.set(data.subarray(from,from+clippedWidth*4),row*clippedWidth*4);
       }
 
-      add(jsQR(scratch.subarray(0,required),clippedWidth,clippedHeight,{inversionAttempts:'attemptBoth'})?.data);
+      const crop=scratch.subarray(0,required);
+      const fast=jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'dontInvert'})?.data;
+      if(fast) add(fast);
+      else add(jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'attemptBoth'})?.data);
     }catch{
       // A single bad region must never kill the camera loop.
     }
