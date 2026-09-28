@@ -409,12 +409,12 @@ async function qrPhoneGeometryRecoveryDiagnostic() {
   sourceCtx.drawImage(qrCanvas, 420, 0, 1080, 1080);
 
   const recovery = document.createElement('canvas');
-  recovery.width = 1120;
-  recovery.height = 1120;
+  recovery.width = 720;
+  recovery.height = 720;
   const recoveryCtx = recovery.getContext('2d', { willReadFrequently: true });
   assert(recoveryCtx, 'Phone-geometry recovery canvas context unavailable.');
   recoveryCtx.imageSmoothingEnabled = false;
-  recoveryCtx.drawImage(source, 420, 0, 1080, 1080, 0, 0, 1120, 1120);
+  recoveryCtx.drawImage(source, 420, 0, 1080, 1080, 0, 0, 720, 720);
 
   const image = recoveryCtx.getImageData(0, 0, recovery.width, recovery.height);
   const pool = new QrDecodePool(1);
@@ -422,7 +422,7 @@ async function qrPhoneGeometryRecoveryDiagnostic() {
     const result = await pool.decode(image.data.buffer, image.width, image.height, 0);
     assert(result, 'Phone-geometry recovery worker returned no result.');
     assert(result.values.includes(raw), 'Centered square recovery could not decode the ORX1 payload from a 16:9 camera geometry.');
-    return '16:9 source → centered 1080px square crop → 1120px recovery decode succeeded';
+    return '16:9 source → centered 1080px square crop → 720px runtime recovery decode succeeded';
   } finally {
     pool.terminate();
   }
