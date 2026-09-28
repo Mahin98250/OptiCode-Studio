@@ -41,11 +41,7 @@ type Telemetry = {
 };
 
 type ZxingReader = {
-  decodeFromVideoElementContinuously(
-    source:HTMLVideoElement,
-    callback:(result:{getText:()=>string}|null,error?:unknown)=>unknown,
-  ):Promise<unknown>;
-  stopContinuousDecode:()=>void;
+  decodeFromVideoElement(source:HTMLVideoElement):Promise<{getText:()=>string}>;
   reset:()=>void;
 };
 
@@ -424,7 +420,6 @@ export function Transfer() {
     receivingRef.current=false;
     streamRef.current?.getTracks().forEach(t=>t.stop());
     streamRef.current=null;
-    try{zxingReaderRef.current?.stopContinuousDecode();}catch{}
     try{zxingReaderRef.current?.reset();}catch{}
     zxingReaderRef.current=null;
     zxingActiveRef.current=false;
@@ -445,34 +440,37 @@ export function Transfer() {
     if(!receivingRef.current || !videoRef.current)return false;
     try{
       const reader=new BrowserQRCodeReader() as unknown as ZxingReader & {timeBetweenDecodingAttempts?:number};
-      reader.timeBetweenDecodingAttempts=450;
+      if('timeBetweenDecodingAttempts' in reader)reader.timeBetweenDecodingAttempts=350;
       zxingReaderRef.current=reader;
       zxingActiveRef.current=true;
       zxingCallsRef.current=0;
       setTelemetry(prev=>({...prev,zxingAssist:true,zxingCalls:0}));
 
-      const video=videoRef.current;
-      void reader.decodeFromVideoElementContinuously(video,(result)=>{
-        if(!receivingRef.current || !zxingActiveRef.current)return;
-        zxingCallsRef.current+=1;
-        if(!result)return;
-        const value=result.getText();
-        if(!value)return;
-        qrDetectionsRef.current+=1;
-        lastDetectionRef.current=value.slice(0,48);
-        noDetectionDecodeCountRef.current=0;
-        void processValue(value);
-        setTelemetry(prev=>({...prev,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,zxingCalls:zxingCallsRef.current,lastDetection:lastDetectionRef.current}));
-      }).catch(error=>{
-        if(!receivingRef.current)return;
-        zxingActiveRef.current=false;
-        zxingReaderRef.current=null;
-        setTelemetry(prev=>({...prev,zxingAssist:false,zxingCalls:zxingCallsRef.current}));
-        if(error instanceof Error && /camera|stream|video/i.test(error.message)){
-          setError('ZXing camera assist stopped: '+error.message);
+      const loop=async()=>{
+        while(receivingRef.current && zxingActiveRef.current && zxingReaderRef.current===reader && videoRef.current){
+          zxingCallsRef.current+=1;
+          try{
+            const result=await reader.decodeFromVideoElement(videoRef.current);
+            if(!receivingRef.current || !zxingActiveRef.current)break;
+            const value=result?.getText();
+            if(value){
+              qrDetectionsRef.current+=1;
+              lastDetectionRef.current=value.slice(0,48);
+              noDetectionDecodeCountRef.current=0;
+              decodeMaxDimensionRef.current=720;
+              void processValue(value);
+            }
+          }catch{
+            // Live video has no result while the scene is unsolved. Retry.
+          }
+          setTelemetry(prev=>({...prev,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,zxingCalls:zxingCallsRef.current,lastDetection:lastDetectionRef.current}));
+          await new Promise<void>(resolve=>window.setTimeout(resolve,140));
         }
-      });
+      };
 
+      void loop().catch(()=>{
+        if(receivingRef.current)setTelemetry(prev=>({...prev,zxingAssist:false,zxingCalls:zxingCallsRef.current}));
+      });
       return true;
     }catch{
       zxingReaderRef.current=null;
@@ -481,7 +479,6 @@ export function Transfer() {
       return false;
     }
   }
-
   async function startNativeQrAssist(){
     if(!receivingRef.current || !videoRef.current)return false;
 
