@@ -575,6 +575,11 @@ export function Transfer() {
     }
     const loop=async()=>{
       if(!receivingRef.current || !fallbackActiveRef.current || !videoRef.current || !qrPoolRef.current) return;
+      if(qrPoolRef.current.healthyCount===0){
+        setError('All QR decoder workers failed to start. Restart the receiver and try again.');
+        stopReceive();
+        return;
+      }
       const started=performance.now();
       const video=videoRef.current;
       const sourceWidth=video.videoWidth;
