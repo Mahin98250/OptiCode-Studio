@@ -57,13 +57,10 @@ function decode(request:DecodeRequest):DecodeResult{
         // Fast path: normal black-on-white QR first. jsQR documents that
         // attemptBoth costs about 50% more work. Only pay that cost when the
         // normal polarity fails.
-        const fast=jsQR(data,request.width,request.height,{inversionAttempts:'dontInvert'})?.data;
-        if(fast){
-          add(fast);
-        }else{
-          const fallback=jsQR(data,request.width,request.height,{inversionAttempts:'attemptBoth'})?.data;
-          add(fallback);
-        }
+        // The sender always emits standard black-on-white QR modules.
+        // Keep the hot path to one jsQR attempt. Inversion is reserved for
+        // recovery crops so a missed normal QR does not double every decode.
+        add(jsQR(data,request.width,request.height,{inversionAttempts:'dontInvert'})?.data);
         return;
       }
 
