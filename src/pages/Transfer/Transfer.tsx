@@ -551,8 +551,16 @@ export function Transfer() {
     fallbackCanvasRef.current=canvas;
     const ctx=canvas.getContext('2d',{willReadFrequently:true});
     if(!ctx){ setError('Camera fallback decoder could not create an image surface.'); stopReceive(); return; }
-    const pool=qrPoolRef.current ?? new QrDecodePool();
-    qrPoolRef.current=pool;
+    let pool:QrDecodePool;
+    try{
+      pool=qrPoolRef.current ?? new QrDecodePool();
+      qrPoolRef.current=pool;
+    }catch(error){
+      fallbackActiveRef.current=false;
+      setError(error instanceof Error ? `QR decoder worker unavailable: ${error.message}` : 'QR decoder worker unavailable.');
+      stopReceive();
+      return;
+    }
     const loop=async()=>{
       if(!receivingRef.current || !fallbackActiveRef.current || !videoRef.current || !qrPoolRef.current) return;
       const started=performance.now();
@@ -560,6 +568,12 @@ export function Transfer() {
       const sourceWidth=video.videoWidth;
       const sourceHeight=video.videoHeight;
       cameraFramesRef.current+=1;
+      const healthNow=performance.now();
+      if(healthNow-telemetryTickRef.current>=400){
+        telemetryTickRef.current=healthNow;
+        const elapsed=Math.max(.001,(healthNow-(receiverStartedRef.current??healthNow))/1000);
+        setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,scanDelayMs:scanDelayRef.current,cameraFrames:cameraFramesRef.current,decoderCalls:decoderCallsRef.current,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,lastDetection:lastDetectionRef.current}));
+      }
       if(sourceWidth && sourceHeight){
         const maxDimension=1280;
         const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
@@ -594,12 +608,6 @@ export function Transfer() {
             }
             scanDelayRef.current=decoded.processingMs>75?Math.min(180,Math.max(70,Math.round(decoded.processingMs*.9))):decoded.values.length>0?Math.max(25,scanDelayRef.current-4):Math.min(85,scanDelayRef.current+2);
           }catch(e){setError(e instanceof Error?e.message:'QR decoder worker failed.');}
-        }
-        const healthNow=performance.now();
-        if(healthNow-telemetryTickRef.current>=400){
-          telemetryTickRef.current=healthNow;
-          const elapsed=Math.max(.001,(healthNow-(receiverStartedRef.current??healthNow))/1000);
-          setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,scanDelayMs:scanDelayRef.current,cameraFrames:cameraFramesRef.current,decoderCalls:decoderCallsRef.current,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,lastDetection:lastDetectionRef.current}));
         }
       }
       if(receivingRef.current && fallbackActiveRef.current) fallbackLoopRef.current=window.setTimeout(()=>void loop(),scanDelayRef.current);
@@ -682,6 +690,24 @@ export function Transfer() {
       if(!videoRef.current) throw new Error('Camera preview is unavailable.');
       videoRef.current.srcObject=stream;
       await videoRef.current.play();
+      if(videoRef.current.readyState<2 || videoRef.current.videoWidth===0){
+        await new Promise<void>((resolve,reject)=>{
+          const video=videoRef.current;
+          if(!video){ reject(new Error('Camera preview is unavailable.')); return; }
+          let settled=false;
+          const finish=()=>{ if(settled)return; settled=true; cleanup(); resolve(); };
+          const fail=()=>{ if(settled)return; settled=true; cleanup(); reject(new Error('Camera opened, but no video frames are available.')); };
+          const cleanup=()=>{
+            video.removeEventListener('loadedmetadata',finish);
+            video.removeEventListener('canplay',finish);
+            window.clearTimeout(timeout);
+          };
+          const timeout=window.setTimeout(fail,2500);
+          video.addEventListener('loadedmetadata',finish,{once:true});
+          video.addEventListener('canplay',finish,{once:true});
+          if(video.readyState>=2 && video.videoWidth>0) finish();
+        });
+      }
 
       // MVP receiver path: start the deterministic camera-frame worker immediately.
       // ZXing/BarcodeDetector remain available in the codebase for later experiments,
