@@ -27,7 +27,10 @@ function decode(request:DecodeRequest):DecodeResult{
   // The realtime fallback is deliberately bounded to one refinement level:
   // full frame + four overlapping quadrants. This covers the 1/2/4-lane
   // sender layouts without the old 4x4 (16-region) explosion.
-  const maxDepth=Math.max(1,Math.min(1,request.maxDepth??1));
+  // 0 = full-frame only; 1 = full-frame + four recovery regions.
+  // Do not force depth=1: the receiver uses depth=0 for the high-frequency
+  // acquisition path and enables regional recovery only after misses.
+  const maxDepth=Math.max(0,Math.min(1,request.maxDepth??1));
 
   const add=(value?:string)=>{
     if(!value)return;
