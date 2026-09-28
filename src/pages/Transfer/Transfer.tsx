@@ -526,12 +526,18 @@ export function Transfer() {
         setProgress(null);
       }
       compatibilitySessionRef.current=frame.session;
+      const sessionAtStart=frame.session;
       const added=await addTransferFrame(frame);
+      // A newer optical session can arrive while IndexedDB is committing this
+      // frame. Do not let an older in-flight promise overwrite the new session's
+      // progress or trigger reconstruction for the wrong transfer.
+      if(compatibilitySessionRef.current!==sessionAtStart)return;
       if(added.duplicate)duplicateCountRef.current+=1;
       decodedBytesRef.current=Math.min(frame.size,Math.round((added.received/added.total)*frame.size));
       setProgress(prev=>({mode:'compatibility',session:frame.session,name:frame.name,received:added.received,total:added.total,duplicates:duplicateCountRef.current}));
       if(added.complete){
         const rebuilt=await reconstructTransfer(frame.session);
+        if(compatibilitySessionRef.current!==sessionAtStart)return;
         if(rebuilt){if(benchmarking) await finishBenchmarkRun(); setResult({url:rebuilt.url,name:rebuilt.name,size:rebuilt.size});setProgress(null);stopReceive();}
       }
     }
