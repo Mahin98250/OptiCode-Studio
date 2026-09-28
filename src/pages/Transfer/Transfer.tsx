@@ -675,6 +675,12 @@ export function Transfer() {
     setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,lastDetection:'—'}));
 
     try{
+      if(!window.isSecureContext){
+        throw new Error('Camera access requires HTTPS. Open the GitHub Pages HTTPS address, not an HTTP copy.');
+      }
+      if(!navigator.mediaDevices?.getUserMedia){
+        throw new Error('This browser does not expose camera access (getUserMedia). Use a current Chrome, Edge, Safari, or Firefox browser.');
+      }
       const stream=await navigator.mediaDevices.getUserMedia({
         video:{
           facingMode:{ideal:'environment'},
@@ -685,6 +691,15 @@ export function Transfer() {
         audio:false,
       });
       streamRef.current=stream;receivingRef.current=true;setReceiving(true);
+      const videoTrack=stream.getVideoTracks()[0];
+      if(!videoTrack){
+        throw new Error('Camera permission succeeded, but no video track was returned.');
+      }
+      videoTrack.addEventListener('ended',()=>{
+        if(!receivingRef.current)return;
+        stopReceive();
+        setError('The camera stream ended. Restart the receiver and keep the browser in the foreground.');
+      },{once:true});
       fallbackCanvasRef.current=document.createElement('canvas');
       try{qrPoolRef.current=new QrDecodePool();}catch{qrPoolRef.current=null;}
       if(!videoRef.current) throw new Error('Camera preview is unavailable.');
