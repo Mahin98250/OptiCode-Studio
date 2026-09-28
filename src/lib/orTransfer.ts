@@ -1,7 +1,7 @@
 import { clearSession, getChunkIndexes, getChunks, getSession, putChunkAndCount, putSession } from './sessionStore';
 
 export const OR_TRANSFER_PREFIX = 'ORX1:';
-export const OR_TRANSFER_CHUNK_CHARS = 1500;
+// Conservative MVP payload: smaller QR symbols are substantially easier for phone cameras to acquire reliably.\n// Throughput optimization comes only after physical transfer is proven.\nexport const OR_TRANSFER_CHUNK_CHARS = 900;
 // High-speed optical transfer: each displayed frame can carry multiple independent QR symbols.
 // Keep optical payloads comfortably below QR version 40-L capacity so phone cameras have more decoding margin.
 export const OR_TRANSFER_GRID_SIZE = 4;
