@@ -34,6 +34,11 @@ type Telemetry = {
   decodeMs:number;
   processMs:number;
   scanDelayMs:number;
+  cameraFrames:number;
+  decoderCalls:number;
+  qrDetections:number;
+  transferFrames:number;
+  lastDetection:string;
 };
 
 function getDisplayLaneCount() {
@@ -61,7 +66,7 @@ export function Transfer() {
   const [autoTune,setAutoTune]=useState(false);
   const [benchmarking,setBenchmarking]=useState(false);
   const [benchmark,setBenchmark]=useState<OpticalBenchmark|null>(null);
-  const [telemetry,setTelemetry]=useState<Telemetry>({startedAt:null,renderMs:0,encodeMs:0,prefetchReady:0,encoderWorkers:0,renderCount:0,renderFps:0,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55});
+  const [telemetry,setTelemetry]=useState<Telemetry>({startedAt:null,renderMs:0,encodeMs:0,prefetchReady:0,encoderWorkers:0,renderCount:0,renderFps:0,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,lastDetection:'—'});
   const [screenAwake,setScreenAwake]=useState(false);
   const inputRef=useRef<HTMLInputElement>(null);
   const videoRef=useRef<HTMLVideoElement>(null);
@@ -96,6 +101,12 @@ export function Transfer() {
   const decodedBytesRef=useRef(0);
   const duplicateCountRef=useRef(0);
   const scanDelayRef=useRef(55);
+  const cameraFramesRef=useRef(0);
+  const decoderCallsRef=useRef(0);
+  const qrDetectionsRef=useRef(0);
+  const acceptedTransferFramesRef=useRef(0);
+  const lastDetectionRef=useRef('—');
+  const telemetryTickRef=useRef(0);
   const benchmarkStartedRef=useRef<number|null>(null);
   const benchmarkFramesRef=useRef(0);
   const benchmarkCodesRef=useRef(0);
@@ -507,6 +518,7 @@ export function Transfer() {
     }
     if(isTransferFrame(value)){
       const frame=parseTransferFrame(value); if(!frame)return;
+      acceptedTransferFramesRef.current+=1;
       if(compatibilitySessionRef.current && compatibilitySessionRef.current !== frame.session){
         decodedBytesRef.current=0;
         setProgress(null);
@@ -547,6 +559,7 @@ export function Transfer() {
       const video=videoRef.current;
       const sourceWidth=video.videoWidth;
       const sourceHeight=video.videoHeight;
+      cameraFramesRef.current+=1;
       if(sourceWidth && sourceHeight){
         const maxDimension=1280;
         const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
@@ -560,9 +573,12 @@ export function Transfer() {
         // Keep the camera loop on the bounded full-frame + 2x2 worker path.
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,1);
         if(job){
+          decoderCallsRef.current+=1;
           try{
             const decoded=await job;
             const processStarted=performance.now();
+            qrDetectionsRef.current+=decoded.values.length;
+            if(decoded.values.length>0) lastDetectionRef.current=decoded.values[0].slice(0,48);
             await Promise.all(decoded.values.map(value=>processValue(value)));
             const processMs=performance.now()-processStarted;
             recordBenchmark(decoded.values,decoded.processingMs);
@@ -573,11 +589,17 @@ export function Transfer() {
             const windowMs=now-detectedWindowRef.current.started;
             if(windowMs>=500){
               const elapsed=Math.max(.001,(now-(receiverStartedRef.current??now))/1000);
-              setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,detectedPerSecond:detectedWindowRef.current.count/(windowMs/1000),solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,decodeMs:prev.decodeMs===0?decoded.processingMs:prev.decodeMs*.7+decoded.processingMs*.3,processMs:prev.processMs===0?processMs:prev.processMs*.7+processMs*.3,scanDelayMs:scanDelayRef.current}));
+              setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,detectedPerSecond:detectedWindowRef.current.count/(windowMs/1000),solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,decodeMs:prev.decodeMs===0?decoded.processingMs:prev.decodeMs*.7+decoded.processingMs*.3,processMs:prev.processMs===0?processMs:prev.processMs*.7+processMs*.3,scanDelayMs:scanDelayRef.current,cameraFrames:cameraFramesRef.current,decoderCalls:decoderCallsRef.current,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,lastDetection:lastDetectionRef.current}));
               detectedWindowRef.current={started:now,count:0};
             }
             scanDelayRef.current=decoded.processingMs>75?Math.min(180,Math.max(70,Math.round(decoded.processingMs*.9))):decoded.values.length>0?Math.max(25,scanDelayRef.current-4):Math.min(85,scanDelayRef.current+2);
           }catch(e){setError(e instanceof Error?e.message:'QR decoder worker failed.');}
+        }
+        const healthNow=performance.now();
+        if(healthNow-telemetryTickRef.current>=400){
+          telemetryTickRef.current=healthNow;
+          const elapsed=Math.max(.001,(healthNow-(receiverStartedRef.current??healthNow))/1000);
+          setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,scanDelayMs:scanDelayRef.current,cameraFrames:cameraFramesRef.current,decoderCalls:decoderCallsRef.current,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,lastDetection:lastDetectionRef.current}));
         }
       }
       if(receivingRef.current && fallbackActiveRef.current) fallbackLoopRef.current=window.setTimeout(()=>void loop(),scanDelayRef.current);
@@ -639,9 +661,10 @@ export function Transfer() {
   async function startReceive(){
     setError('');setResult(null);setProgress(null);resetDecoder();
     receiverStartedRef.current=null;solvedRef.current=0;duplicateCountRef.current=0;
-    detectedWindowRef.current={started:0,count:0};scanDelayRef.current=120;
+    detectedWindowRef.current={started:0,count:0};scanDelayRef.current=55;
+    cameraFramesRef.current=0;decoderCallsRef.current=0;qrDetectionsRef.current=0;acceptedTransferFramesRef.current=0;lastDetectionRef.current='—';telemetryTickRef.current=0;
     nativeMissRef.current=0;nativeSlowRef.current=0;fallbackActiveRef.current=false;
-    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:120}));
+    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,lastDetection:'—'}));
 
     try{
       const stream=await navigator.mediaDevices.getUserMedia({
@@ -660,48 +683,16 @@ export function Transfer() {
       videoRef.current.srcObject=stream;
       await videoRef.current.play();
 
-      // Primary MVP decoder: ZXing performs repeated QR acquisition directly
-      // against the live video element. This avoids relying on optional browser
-      // BarcodeDetector support and keeps the prototype focused on QR only.
-      let zxingStarted=false;
+      // MVP receiver path: start the deterministic camera-frame worker immediately.
+      // ZXing/BarcodeDetector remain available in the codebase for later experiments,
+      // but they must not gate the first working end-to-end transfer.
       try{
-        const reader=new BrowserQRCodeReader();
-        zxingReaderRef.current=reader;
-        const controls=await reader.decodeFromVideoElement(videoRef.current,(result)=>{
-          if(!receivingRef.current || !result)return;
-          if(zxingFallbackTimerRef.current!==null){window.clearTimeout(zxingFallbackTimerRef.current);zxingFallbackTimerRef.current=null;}
-          const now=performance.now();
-          if(receiverStartedRef.current===null)receiverStartedRef.current=now;
-          if(detectedWindowRef.current.started===0)detectedWindowRef.current.started=now;
-          detectedWindowRef.current.count+=1;
-          nativeMissRef.current=0;
-          void processValue(result.getText()).then(()=>{
-            const processNow=performance.now();
-            const elapsed=Math.max(.001,(processNow-(receiverStartedRef.current??processNow))/1000);
-            const windowMs=processNow-detectedWindowRef.current.started;
-            if(windowMs>=500){
-              setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,detectedPerSecond:detectedWindowRef.current.count/(windowMs/1000),solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,scanDelayMs:scanDelayRef.current}));
-              detectedWindowRef.current={started:processNow,count:0};
-            }
-          }).catch(e=>setError(e instanceof Error?e.message:'Unable to process the decoded QR frame.'));
-        });
-        zxingControlsRef.current=controls;
-        zxingStarted=true;
-        // Do not let a silent decoder failure stall the prototype forever.
-        // Give ZXing a few seconds to acquire a real QR, then switch to the
-        // existing worker decoder automatically if nothing has been detected.
-        zxingFallbackTimerRef.current=window.setTimeout(()=>{
-          if(!receivingRef.current || fallbackActiveRef.current)return;
-          try{ zxingControlsRef.current?.stop(); }catch{}
-          zxingControlsRef.current=null;
-          zxingReaderRef.current=null;
-          startFallbackDecoder();
-        },5000);
-      }catch{
-        zxingStarted=false;
-      }
-
-      if(!zxingStarted) startFallbackDecoder();
+        const track=stream.getVideoTracks()[0];
+        if(track?.applyConstraints){
+          await track.applyConstraints({advanced:[{focusMode:'continuous'}]} as MediaTrackConstraints).catch(()=>{});
+        }
+      }catch{}
+      startFallbackDecoder();
     }catch(e){
       stopReceive();
       setError(e instanceof Error?e.message:'Camera permission was denied.');
@@ -740,11 +731,11 @@ export function Transfer() {
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-cyan-300">Live optical stream</p><p className="mt-1 text-sm text-[var(--text-muted)]">{fountain?'MVP fountain stream · systematic + recovery droplets':compat?'Sequential compatibility stream':'Choose a file to begin'}</p></div>{(fountain||compat)&&<button onClick={()=>{if(playing)stopPlayback();else void startPlayback();}} className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950">{playing?'Pause':'Start stream'}</button>}</div>
         {(fountain||compat)?<canvas ref={qrCanvasRef} width={900} height={900} aria-label="OptiTransfer QR stream" className="transfer-canvas mx-auto mt-5 aspect-square w-full max-w-[760px] min-h-[min(72vh,760px)] rounded-2xl bg-white p-1 sm:p-2"/>:<div className="mt-5 grid aspect-square place-items-center rounded-2xl bg-black/20 text-sm text-[var(--text-muted)]">QR stream preview</div>}
         {(fountain||compat)&&<div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Auto tune<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On · render-safe</option><option value="off">Off · manual</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="500">500 ms · slow reliable</option><option value="700">700 ms · MVP default</option><option value="1000">1000 ms · maximum acquisition margin</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Engine</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Render</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Payload</b><p className="mt-1 text-[var(--text-muted)]">{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':'1125 raw bytes/frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Display lanes</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · MVP keeps mobile transfer at one physical lane</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Recovery</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Fountain':'Sequential'}</p></div></div>}
+          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Auto tune<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On · render-safe</option><option value="off">Off · manual</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="500">500 ms · slow reliable</option><option value="700">700 ms · MVP default</option><option value="1000">1000 ms · maximum acquisition margin</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Engine</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Render</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Payload</b><p className="mt-1 text-[var(--text-muted)]">{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':'525 raw bytes/frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Display lanes</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · MVP keeps mobile transfer at one physical lane</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Recovery</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Fountain':'Sequential'}</p></div></div>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
       <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-cover sm:min-h-[560px]"/><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving)stopReceive();else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning multi-QR':'Camera idle'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Benchmark 1 MB'}</button>}</div></div>
-      <div className="transfer-receiver-panel glass-panel rounded-[28px] p-5"><LockKeyhole size={20} className="text-cyan-300"/><p className="mt-3 font-bold">Loss-tolerant receiver</p><p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">Start the receiver before or after the sender. Fountain mode does not require frame 1, frame 2, frame 3… in order.</p><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="transfer-receiver-panel glass-panel rounded-[28px] p-5"><LockKeyhole size={20} className="text-cyan-300"/><p className="mt-3 font-bold">Loss-tolerant receiver</p><p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">MVP receiver uses a continuous camera-frame worker immediately. It reports camera frames, decoder calls, QR hits, and accepted ORX1 frames separately so failures are diagnosable.</p><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><Activity size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Decode</p><p className="mt-1 text-sm font-black">{telemetry.detectedPerSecond.toFixed(1)}/s</p></div>
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><Zap size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Goodput</p><p className="mt-1 text-sm font-black">{telemetry.goodputKbps.toFixed(1)} KB/s</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{(telemetry.goodputKbps/1024).toFixed(2)} MB/s</p></div>
           <div className="rounded-2xl bg-white/5 p-3"><TimerReset size={16} className="text-white/70"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Decode</p><p className="mt-1 text-sm font-black">{telemetry.decodeMs.toFixed(0)} ms</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">pipeline {telemetry.processMs.toFixed(0)} ms</p></div>
