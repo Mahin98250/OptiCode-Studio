@@ -3,7 +3,7 @@ import { clearSession, getChunkIndexes, getChunks, getSession, putChunkAndCount,
 export const OR_TRANSFER_PREFIX = 'ORX1:';
 // Conservative MVP payload: smaller QR symbols are substantially easier for phone cameras to acquire reliably.
 // Throughput optimization comes only after physical transfer is proven.
-export const OR_TRANSFER_CHUNK_CHARS = 900;
+export const OR_TRANSFER_CHUNK_CHARS = 700;
 // High-speed optical transfer: each displayed frame can carry multiple independent QR symbols.
 // Keep optical payloads comfortably below QR version 40-L capacity so phone cameras have more decoding margin.
 export const OR_TRANSFER_GRID_SIZE = 4;
