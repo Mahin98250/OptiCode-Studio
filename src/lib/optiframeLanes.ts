@@ -24,21 +24,34 @@ export type OptiFrameCanvasCache = {
 
 export function createOptiFrameCanvasCache(maxEntries = 96): OptiFrameCanvasCache {
   const limit = Math.max(1, Math.floor(maxEntries));
-  const entries = new Map<number, HTMLCanvasElement>();
+  const entries = new Map<string, HTMLCanvasElement>();
+
+  const payloadKey = (payload: Uint8Array, sequence: number, total: number) => {
+    // Sequence alone is not a valid cache key: different lanes can reuse the
+    // same sequence while carrying different payloads. Encode the complete
+    // payload into the key so a reused sequence can never return another
+    // lane's optical frame.
+    let binary = '';
+    for (let i = 0; i < payload.length; i += 0x8000) {
+      binary += String.fromCharCode(...payload.subarray(i, Math.min(i + 0x8000, payload.length)));
+    }
+    return sequence + ':' + total + ':' + btoa(binary);
+  };
 
   return {
     get(payload, sequence, total) {
-      const cached = entries.get(sequence);
+      const key = payloadKey(payload, sequence, total);
+      const cached = entries.get(key);
       if (cached) {
-        entries.delete(sequence);
-        entries.set(sequence, cached);
+        entries.delete(key);
+        entries.set(key, cached);
         return cached;
       }
 
       const encoded = encodeOptiFrame(payload, sequence, total);
-      entries.set(sequence, encoded.canvas);
+      entries.set(key, encoded.canvas);
       while (entries.size > limit) {
-        const oldest = entries.keys().next().value as number | undefined;
+        const oldest = entries.keys().next().value as string | undefined;
         if (oldest === undefined) break;
         entries.delete(oldest);
       }
