@@ -381,6 +381,10 @@ export function Transfer() {
     nativeMissRef.current=0;
     nativeSlowRef.current=0;
     setReceiving(false);
+    try{ zxingControlsRef.current?.stop(); }catch{}
+    zxingControlsRef.current=null;
+    zxingReaderRef.current=null;
+    if(zxingFallbackTimerRef.current!==null){window.clearTimeout(zxingFallbackTimerRef.current);zxingFallbackTimerRef.current=null;}
   }
   function resetDecoder(){
     fountainDecoderRef.current=null;
