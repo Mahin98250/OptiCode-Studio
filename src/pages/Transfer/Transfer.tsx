@@ -378,9 +378,149 @@ export function Transfer() {
     qrPoolRef.current=null;
     if(benchmarkTimerRef.current!==null){window.clearTimeout(benchmarkTimerRef.current);benchmarkTimerRef.current=null;}
     if(fallbackLoopRef.current!==null){window.clearTimeout(fallbackLoopRef.current);fallbackLoopRef.current=null;}
+    if(nativeLoopRef.current!==null){window.clearTimeout(nativeLoopRef.current);nativeLoopRef.current=null;}
     fallbackActiveRef.current=false;
+    nativeActiveRef.current=false;
+    nativeInFlightRef.current=false;
+    nativeDetectorRef.current=null;
     setReceiving(false);
   }
+
+  async function startNativeQrAssist(){
+    if(!receivingRef.current || !videoRef.current)return false;
+
+    const detectorCtor=(window as Window & {
+      BarcodeDetector?: new(options?:{formats?:string[]})=>NativeQrDetector;
+    }).BarcodeDetector;
+    if(typeof detectorCtor!=='function')return false;
+
+    try{
+      const staticApi=detectorCtor as unknown as {getSupportedFormats?:()=>Promise<string[]>};
+      const supported=typeof staticApi.getSupportedFormats==='function'
+        ? await staticApi.getSupportedFormats()
+        : null;
+      if(supported && !supported.includes('qr_code'))return false;
+      nativeDetectorRef.current=new detectorCtor({formats:['qr_code']});
+    }catch{
+      nativeDetectorRef.current=null;
+      return false;
+    }
+
+    nativeActiveRef.current=true;
+    nativeCallsRef.current=0;
+    setTelemetry(prev=>({...prev,nativeAssist:true,nativeCalls:0}));
+
+    const loop=async()=>{
+      if(!receivingRef.current || !nativeActiveRef.current || !videoRef.current || !nativeDetectorRef.current)return;
+
+      const video=videoRef.current;
+      if(!nativeInFlightRef.current && video.readyState>=2 && video.videoWidth>0){
+        nativeInFlightRef.current=true;
+        nativeCallsRef.current+=1;
+
+        try{
+          const found=await nativeDetectorRef.current.detect(video);
+          const values=found.map(item=>item.rawValue).filter((value):value is string=>Boolean(value));
+
+          if(values.length>0){
+            qrDetectionsRef.current+=values.length;
+            lastDetectionRef.current=values[0].slice(0,48);
+            noDetectionDecodeCountRef.current=0;
+            decodeMaxDimensionRef.current=1120;
+            await Promise.all(values.map(value=>processValue(value)));
+          }
+
+          setTelemetry(prev=>({
+            ...prev,
+            qrDetections:qrDetectionsRef.current,
+            transferFrames:acceptedTransferFramesRef.current,
+            nativeCalls:nativeCallsRef.current,
+            lastDetection:lastDetectionRef.current,
+          }));
+        }catch{
+          // Optional accelerator only. Never tear down the deterministic jsQR path.
+          nativeActiveRef.current=false;
+          nativeDetectorRef.current=null;
+          setTelemetry(prev=>({...prev,nativeAssist:false,nativeCalls:nativeCallsRef.current}));
+        }finally{
+          nativeInFlightRef.current=false;
+        }
+      }
+
+      if(receivingRef.current && nativeActiveRef.current){
+        nativeLoopRef.current=window.setTimeout(()=>void loop(),220);
+      }
+    };
+
+    void loop();
+    return true;
+  }
+
+  async function probeLiveCameraFrame(){
+    const video=videoRef.current;
+    if(!receivingRef.current || !video || video.readyState<2 || !video.videoWidth){
+      setProbeStatus('Camera frame unavailable — start the receiver first.');
+      return;
+    }
+
+    const started=performance.now();
+    const sourceWidth=video.videoWidth;
+    const sourceHeight=video.videoHeight;
+
+    const fullCanvas=fallbackCanvasRef.current ?? document.createElement('canvas');
+    fallbackCanvasRef.current=fullCanvas;
+    const fullCtx=fullCanvas.getContext('2d',{willReadFrequently:true});
+
+    const centerCanvas=recoveryCanvasRef.current ?? document.createElement('canvas');
+    recoveryCanvasRef.current=centerCanvas;
+    const centerCtx=centerCanvas.getContext('2d',{willReadFrequently:true});
+
+    if(!fullCtx || !centerCtx){
+      setProbeStatus('Probe failed: unable to create camera image surfaces.');
+      return;
+    }
+
+    const maxDimension=720;
+    const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
+    const width=Math.max(1,Math.round(sourceWidth*scale));
+    const height=Math.max(1,Math.round(sourceHeight*scale));
+
+    fullCanvas.width=width;
+    fullCanvas.height=height;
+    fullCtx.imageSmoothingEnabled=true;
+    fullCtx.imageSmoothingQuality='high';
+    fullCtx.drawImage(video,0,0,width,height);
+    const image=fullCtx.getImageData(0,0,width,height);
+    const direct=jsQR(image.data,width,height,{inversionAttempts:'attemptBoth'})?.data;
+
+    const cropSize=Math.min(sourceWidth,sourceHeight);
+    const cropScale=Math.min(1,maxDimension/cropSize);
+    const centerSize=Math.max(1,Math.round(cropSize*cropScale));
+    centerCanvas.width=centerSize;
+    centerCanvas.height=centerSize;
+    centerCtx.imageSmoothingEnabled=true;
+    centerCtx.imageSmoothingQuality='high';
+    const sx=Math.floor((sourceWidth-cropSize)/2);
+    const sy=Math.floor((sourceHeight-cropSize)/2);
+    centerCtx.drawImage(video,sx,sy,cropSize,cropSize,0,0,centerSize,centerSize);
+    const centerImage=centerCtx.getImageData(0,0,centerSize,centerSize);
+    const center=jsQR(centerImage.data,centerSize,centerSize,{inversionAttempts:'attemptBoth'})?.data;
+
+    const ms=performance.now()-started;
+    const details=`${sourceWidth}×${sourceHeight} → ${width}×${height} · full ${direct?'HIT':'MISS'} · center ${center?'HIT':'MISS'} · ${ms.toFixed(0)} ms`;
+    setProbeStatus(details);
+
+    const values=[direct,center].filter((value):value is string=>Boolean(value));
+    const unique=[...new Set(values)];
+    for(const value of unique)await processValue(value);
+
+    if(unique.length>0){
+      qrDetectionsRef.current+=unique.length;
+      lastDetectionRef.current=unique[0].slice(0,48);
+      setTelemetry(prev=>({...prev,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,lastDetection:lastDetectionRef.current}));
+    }
+  }
+
   function resetDecoder(){
     fountainDecoderRef.current=null;
     fountainMetaRef.current=null;
@@ -679,8 +819,12 @@ export function Transfer() {
     cameraFramesRef.current=0;decoderCallsRef.current=0;qrDetectionsRef.current=0;acceptedTransferFramesRef.current=0;lastDetectionRef.current='—';telemetryTickRef.current=0;
     decodeMaxDimensionRef.current=1120;
     noDetectionDecodeCountRef.current=0;
+    nativeCallsRef.current=0;
+    nativeInFlightRef.current=false;
     fallbackActiveRef.current=false;
-    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,lastDetection:'—'}));
+    nativeActiveRef.current=false;
+    setProbeStatus('Not run');
+    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,nativeCalls:0,nativeAssist:false,lastDetection:'—'}));
 
     try{
       if(!window.isSecureContext){
@@ -742,6 +886,7 @@ export function Transfer() {
           await track.applyConstraints({advanced:[{focusMode:'continuous'}]} as unknown as MediaTrackConstraints).catch(()=>{});
         }
       }catch{}
+      await startNativeQrAssist();
       startFallbackDecoder();
     }catch(e){
       stopReceive();
@@ -788,10 +933,11 @@ export function Transfer() {
       <div className="transfer-receiver-panel glass-panel rounded-[28px] p-5"><LockKeyhole size={20} className="text-cyan-300"/><p className="mt-3 font-bold">Loss-tolerant receiver</p><p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">MVP receiver uses a continuous camera-frame worker immediately. It reports camera frames, decoder calls, QR hits, and accepted ORX1 frames separately so failures are diagnosable.</p><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><Activity size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Camera</p><p className="mt-1 text-sm font-black">{telemetry.cameraFrames}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">video frames</p></div>
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><ScanLine size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">QR hits</p><p className="mt-1 text-sm font-black">{telemetry.qrDetections}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.detectedPerSecond.toFixed(1)}/s</p></div>
-          <div className="rounded-2xl bg-white/5 p-3"><TimerReset size={16} className="text-white/70"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Decoder</p><p className="mt-1 text-sm font-black">{telemetry.decodeMs.toFixed(0)} ms</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.decoderCalls} calls · {Math.round(telemetry.scanDelayMs)} ms cadence</p></div>
+          <div className="rounded-2xl bg-white/5 p-3"><TimerReset size={16} className="text-white/70"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Decoder</p><p className="mt-1 text-sm font-black">{telemetry.decodeMs.toFixed(0)} ms</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.decoderCalls} jsQR calls · {telemetry.nativeAssist?'native QR assist':'worker-only'}</p></div>
           <div className="rounded-2xl bg-white/5 p-3"><ShieldCheck size={16} className="text-emerald-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">ORX1 accepted</p><p className="mt-1 text-sm font-black">{telemetry.transferFrames}</p><p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">{telemetry.lastDetection}</p></div>
         </div>
-        <div className="mt-3 rounded-2xl bg-white/5 p-3 text-[10px] leading-5 text-[var(--text-muted)]"><span className="font-bold text-white/80">Acquisition:</span> camera {telemetry.cameraFrames>0?'✓':'…'} → decoder {telemetry.decoderCalls>0?'✓':'…'} → QR {telemetry.qrDetections>0?'✓':'…'} → ORX1 {telemetry.transferFrames>0?'✓':'…'} · last: {telemetry.lastDetection}</div>
+        <div className="mt-3 rounded-2xl bg-white/5 p-3 text-[10px] leading-5 text-[var(--text-muted)]"><span className="font-bold text-white/80">Acquisition:</span> camera {telemetry.cameraFrames>0?'✓':'…'} → decoder {telemetry.decoderCalls>0?'✓':'…'} → QR {telemetry.qrDetections>0?'✓':'…'} → ORX1 {telemetry.transferFrames>0?'✓':'…'} · native QR: {telemetry.nativeAssist?'ON':'unavailable'} ({telemetry.nativeCalls}) · last: {telemetry.lastDetection}</div>
+        {receiving&&<div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl bg-white/5 p-3 text-[10px] text-[var(--text-muted)]"><button onClick={()=>{void probeLiveCameraFrame();}} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 font-bold text-cyan-200">Probe live camera frame</button><span>Exact live-video pixels: full-frame + centered-square jsQR.</span><span className="font-bold text-white/80">{probeStatus}</span></div>}
         {benchmark&&<div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.05] p-4"><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold uppercase tracking-[.14em] text-cyan-200">Physical 1 MB benchmark</p><span className="text-[10px] text-[var(--text-muted)]">{(benchmark.durationMs/1000).toFixed(1)} s</span></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"><div><p className="text-[10px] text-[var(--text-muted)]">Sustained</p><p className="text-sm font-black">{benchmark.goodputKbps.toFixed(1)} KB/s</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Peak ≥1s</p><p className="text-sm font-black">{benchmark.peakGoodputKbps.toFixed(1)} KB/s</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Codes/sec</p><p className="text-sm font-black">{benchmark.sustainedDecodeRate.toFixed(1)} / {benchmark.peakDecodeRate.toFixed(1)}</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Unique codes</p><p className="text-sm font-black">{benchmark.uniqueCodes}</p></div></div><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-xl bg-white/5 p-3"><p className="text-[10px] text-[var(--text-muted)]">Decimen desktop→phone reference</p><p className="mt-1 text-xs font-bold">418.5 KB/s sustained · 601.5 KB/s peak</p></div><div className="rounded-xl bg-white/5 p-3"><p className="text-[10px] text-[var(--text-muted)]">Decimen phone→phone reference</p><p className="mt-1 text-xs font-bold">199.2 KB/s sustained · 340.8 KB/s peak</p></div></div><p className="mt-3 text-[10px] leading-5 text-[var(--text-muted)]">Run this on the actual device pair. The result is a measurement, not a simulated claim. To establish a “better than Decimen” result, repeat the same 1 MB, 10-second methodology on a comparable device pair and compare sustained and ≥1-second peak goodput.</p></div>}{progress&&<div className="mt-5 rounded-2xl bg-white/5 p-4"><p className="truncate text-sm font-bold">{progress.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{progress.mode==='fountain'?`${progress.received.toLocaleString()} unique droplets · ${progress.total.toLocaleString()} source blocks`:progress.mode==='multi-image'?`${progress.received} / ${progress.total} image frames`:`${progress.received} / ${progress.total} frames`}</p><div className="mt-3 h-2 rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all" style={{width:`${Math.min(100,Math.round(progress.received/progress.total*100))}%`}}/></div></div>}{result&&<div className="mt-5 rounded-2xl bg-emerald-400/10 p-4"><CheckCircle2 className="text-emerald-300"/><p className="mt-2 font-bold">File reconstructed & verified</p><p className="mt-1 truncate text-xs text-[var(--text-muted)]">{result.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{(result.size/1024/1024).toFixed(2)} MB · SHA-256 verified</p><a href={result.url} download={result.name} className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-slate-950"><Download size={14}/> Save file</a></div>}{error&&<p className="mt-5 rounded-2xl bg-rose-400/10 p-4 text-sm text-rose-200">{error}</p>}</div>
     </div>}
     <div className="mt-5 grid gap-3 md:grid-cols-3">{[['01','Encode','The file becomes source blocks and optical droplets.'],['02','Stream','The MVP sender uses one optical lane; multi-lane transport is reserved for the optimization phase.'],['03','Recover','Missing frames are tolerated and SHA-256 verifies the result.']].map(([n,t,d])=><div key={n} className="glass-panel rounded-[24px] p-5"><span className="text-xs font-black text-cyan-300">{n}</span><h2 className="mt-2 font-bold">{t}</h2><p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">{d}</p></div>)}</div>
