@@ -446,8 +446,7 @@ export function Transfer() {
   async function startZxingAssist(){
     if(!receivingRef.current || !videoRef.current)return false;
     try{
-      const reader=new BrowserQRCodeReader() as unknown as ZxingReader & {timeBetweenDecodingAttempts?:number};
-      if('timeBetweenDecodingAttempts' in reader)reader.timeBetweenDecodingAttempts=350;
+      const reader=new BrowserQRCodeReader(undefined,{delayBetweenScanAttempts:350,delayBetweenScanSuccess:350}) as unknown as ZxingReader;
       zxingReaderRef.current=reader;
       zxingActiveRef.current=true;
       zxingCallsRef.current=0;
