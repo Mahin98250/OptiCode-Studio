@@ -574,6 +574,7 @@ export function Transfer() {
         const elapsed=Math.max(.001,(healthNow-(receiverStartedRef.current??healthNow))/1000);
         setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,scanDelayMs:scanDelayRef.current,cameraFrames:cameraFramesRef.current,decoderCalls:decoderCallsRef.current,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,lastDetection:lastDetectionRef.current}));
       }
+
       if(sourceWidth && sourceHeight){
         const maxDimension=1280;
         const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
@@ -584,16 +585,21 @@ export function Transfer() {
         ctx.imageSmoothingEnabled=false;
         ctx.drawImage(video,0,0,width,height);
         const image=ctx.getImageData(0,0,width,height);
-        // Keep the camera loop on the bounded full-frame + 2x2 worker path.
+
+        // Do not serialize camera capture behind a slow QR decode. The pool has
+        // multiple workers, so keep feeding fresh frames while workers are busy.
+        // This changes the receiver from "one decode at a time" to a pipelined
+        // acquisition loop without changing the transfer protocol.
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,1);
         if(job){
           decoderCallsRef.current+=1;
-          try{
-            const decoded=await job;
+          void job.then(async decoded=>{
             const processStarted=performance.now();
             qrDetectionsRef.current+=decoded.values.length;
             if(decoded.values.length>0) lastDetectionRef.current=decoded.values[0].slice(0,48);
+
             await Promise.all(decoded.values.map(value=>processValue(value)));
+
             const processMs=performance.now()-processStarted;
             recordBenchmark(decoded.values,decoded.processingMs);
             const now=performance.now();
@@ -606,11 +612,27 @@ export function Transfer() {
               setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,detectedPerSecond:detectedWindowRef.current.count/(windowMs/1000),solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,decodeMs:prev.decodeMs===0?decoded.processingMs:prev.decodeMs*.7+decoded.processingMs*.3,processMs:prev.processMs===0?processMs:prev.processMs*.7+processMs*.3,scanDelayMs:scanDelayRef.current,cameraFrames:cameraFramesRef.current,decoderCalls:decoderCallsRef.current,qrDetections:qrDetectionsRef.current,transferFrames:acceptedTransferFramesRef.current,lastDetection:lastDetectionRef.current}));
               detectedWindowRef.current={started:now,count:0};
             }
-            scanDelayRef.current=decoded.processingMs>75?Math.min(180,Math.max(70,Math.round(decoded.processingMs*.9))):decoded.values.length>0?Math.max(25,scanDelayRef.current-4):Math.min(85,scanDelayRef.current+2);
-          }catch(e){setError(e instanceof Error?e.message:'QR decoder worker failed.');}
+
+            // Adapt the capture cadence to actual decoder cost, but never let
+            // the optical receiver collapse into a single slow serial loop.
+            scanDelayRef.current=decoded.processingMs>150
+              ?Math.min(70,Math.max(40,Math.round(decoded.processingMs*.28)))
+              :decoded.processingMs>75
+                ?Math.min(60,Math.max(35,Math.round(decoded.processingMs*.32)))
+                :decoded.values.length>0
+                  ?Math.max(28,scanDelayRef.current-3)
+                  :Math.min(60,scanDelayRef.current+2);
+          }).catch(e=>{
+            if(receivingRef.current)setError(e instanceof Error?e.message:'QR decoder worker failed.');
+          });
         }
       }
-      if(receivingRef.current && fallbackActiveRef.current) fallbackLoopRef.current=window.setTimeout(()=>void loop(),scanDelayRef.current);
+
+      if(receivingRef.current && fallbackActiveRef.current){
+        // 30–60 ms capture cadence feeds both workers and gives the camera
+        // several acquisition opportunities during each displayed QR interval.
+        fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(30,Math.min(60,scanDelayRef.current)));
+      }
     };
     void loop();
   }
