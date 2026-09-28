@@ -629,9 +629,9 @@ export function Transfer() {
   async function startReceive(){
     setError('');setResult(null);setProgress(null);resetDecoder();
     receiverStartedRef.current=null;solvedRef.current=0;duplicateCountRef.current=0;
-    detectedWindowRef.current={started:0,count:0};scanDelayRef.current=55;
+    detectedWindowRef.current={started:0,count:0};scanDelayRef.current=120;
     nativeMissRef.current=0;nativeSlowRef.current=0;fallbackActiveRef.current=false;
-    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55}));
+    setTelemetry(prev=>({...prev,startedAt:null,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:120}));
 
     try{
       const stream=await navigator.mediaDevices.getUserMedia({
@@ -646,35 +646,47 @@ export function Transfer() {
       streamRef.current=stream;receivingRef.current=true;setReceiving(true);
       fallbackCanvasRef.current=document.createElement('canvas');
       try{qrPoolRef.current=new QrDecodePool();}catch{qrPoolRef.current=null;}
-      if(videoRef.current){videoRef.current.srcObject=stream;await videoRef.current.play();}
+      if(!videoRef.current) throw new Error('Camera preview is unavailable.');
+      videoRef.current.srcObject=stream;
+      await videoRef.current.play();
 
-      const Ctor=(window as unknown as {BarcodeDetector?:DetectorCtor}).BarcodeDetector;
-      let nativeQrReady=false;
-      if(Ctor){
-        try{
-          const supported=await Ctor.getSupportedFormats?.();
-          nativeQrReady=!supported || supported.includes('qr_code');
-        }catch{
-          nativeQrReady=false;
-        }
+      // Primary MVP decoder: ZXing performs repeated QR acquisition directly
+      // against the live video element. This avoids relying on optional browser
+      // BarcodeDetector support and keeps the prototype focused on QR only.
+      let zxingStarted=false;
+      try{
+        const reader=new BrowserQRCodeReader();
+        zxingReaderRef.current=reader;
+        const controls=await reader.decodeFromVideoElement(videoRef.current,(result)=>{
+          if(!receivingRef.current || !result)return;
+          const now=performance.now();
+          if(receiverStartedRef.current===null)receiverStartedRef.current=now;
+          if(detectedWindowRef.current.started===0)detectedWindowRef.current.started=now;
+          detectedWindowRef.current.count+=1;
+          nativeMissRef.current=0;
+          void processValue(result.getText()).then(()=>{
+            const processNow=performance.now();
+            const elapsed=Math.max(.001,(processNow-(receiverStartedRef.current??processNow))/1000);
+            const windowMs=processNow-detectedWindowRef.current.started;
+            if(windowMs>=500){
+              setTelemetry(prev=>({...prev,startedAt:receiverStartedRef.current,detectedPerSecond:detectedWindowRef.current.count/(windowMs/1000),solvedPerSecond:solvedRef.current/elapsed,goodputKbps:(decodedBytesRef.current/1024)/elapsed,duplicates:duplicateCountRef.current,scanDelayMs:scanDelayRef.current}));
+              detectedWindowRef.current={started:processNow,count:0};
+            }
+          }).catch(e=>setError(e instanceof Error?e.message:'Unable to process the decoded QR frame.'));
+        });
+        zxingControlsRef.current=controls;
+        zxingStarted=true;
+      }catch{
+        zxingStarted=false;
       }
 
-      if(Ctor && nativeQrReady){
-        try{
-          detectorRef.current=new Ctor({formats:['qr_code']});
-          void scanLoop();
-        }catch{
-          detectorRef.current=null;
-          nativeQrReady=false;
-        }
-      }
-
-      if(!nativeQrReady) startFallbackDecoder();
+      if(!zxingStarted) startFallbackDecoder();
     }catch(e){
       stopReceive();
       setError(e instanceof Error?e.message:'Camera permission was denied.');
     }
   }
+
   return <section className="transfer-page mx-auto max-w-6xl py-8 sm:py-12">
     <Link to="/" className="text-xs font-semibold text-[var(--text-muted)]">Back home</Link>
     <div className="mt-5 overflow-hidden rounded-[32px] border border-cyan-300/15 bg-[var(--bg-elevated)] p-6 shadow-glass backdrop-blur-2xl sm:p-9">
