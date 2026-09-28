@@ -831,8 +831,9 @@ export function Transfer() {
           height=width;
           if(recoveryCanvas.width!==width)recoveryCanvas.width=width;
           if(recoveryCanvas.height!==height)recoveryCanvas.height=height;
-          recoveryCtx.imageSmoothingEnabled=true;
-          recoveryCtx.imageSmoothingQuality='high';
+          // QR modules are hard-edged geometry. Do not blur them while
+          // reducing the camera frame into the acquisition ROI.
+          recoveryCtx.imageSmoothingEnabled=false;
           const sx=Math.floor((sourceWidth-cropSize)/2);
           const sy=Math.floor((sourceHeight-cropSize)/2);
           recoveryCtx.drawImage(video,sx,sy,cropSize,cropSize,0,0,width,height);
