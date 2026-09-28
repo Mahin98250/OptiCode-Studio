@@ -53,7 +53,7 @@ function decode(request:DecodeRequest):DecodeResult{
       if(x===0 && y===0 && clippedWidth===request.width && clippedHeight===request.height){
         // OptiCode renders black modules on white. jsQR documents that
         // attemptBoth costs roughly 50% extra work, so stay on dontInvert.
-        add(jsQR(data,request.width,request.height,{inversionAttempts:'dontInvert'})?.data);
+        add(jsQR(data,request.width,request.height,{inversionAttempts:'attemptBoth'})?.data);
         return;
       }
 
@@ -65,7 +65,7 @@ function decode(request:DecodeRequest):DecodeResult{
         scratch.set(data.subarray(from,from+clippedWidth*4),row*clippedWidth*4);
       }
 
-      add(jsQR(scratch.subarray(0,required),clippedWidth,clippedHeight,{inversionAttempts:'dontInvert'})?.data);
+      add(jsQR(scratch.subarray(0,required),clippedWidth,clippedHeight,{inversionAttempts:'attemptBoth'})?.data);
     }catch{
       // A single bad region must never kill the camera loop.
     }
