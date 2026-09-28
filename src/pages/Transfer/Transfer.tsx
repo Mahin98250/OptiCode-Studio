@@ -45,7 +45,7 @@ function getDisplayLaneCount() {
 
 export function Transfer() {
   const [tab,setTab]=useState<'send'|'receive'>('send');
-  const [mode,setMode]=useState<'fountain'|'compatibility'>('fountain');
+  const [mode,setMode]=useState<'fountain'|'compatibility'>('compatibility');
   const [file,setFile]=useState<File|null>(null);
   const [fountain,setFountain]=useState<FountainPlan|null>(null);
   const [compat,setCompat]=useState<Awaited<ReturnType<typeof createTransfer>>|null>(null);
@@ -166,7 +166,7 @@ export function Transfer() {
           const fountainMode=playbackFountainRef.current;
           const plan=fountainMode ? fountain : compat;
           if(plan && qrCanvasRef.current){
-            const grid=getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : (fountainMode ? FOUNTAIN_GRID_SIZE : OR_TRANSFER_GRID_SIZE);
+            const grid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
             const totalGroups=fountainMode
               ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/grid))
               : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/grid));
@@ -211,7 +211,7 @@ export function Transfer() {
     groupIndex:number,
     fountainMode:boolean,
   ){
-    const grid=getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : (fountainMode ? FOUNTAIN_GRID_SIZE : OR_TRANSFER_GRID_SIZE);
+    const grid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
     const totalGroups=fountainMode
       ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/grid))
       : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/grid));
@@ -296,7 +296,7 @@ export function Transfer() {
             renderWindowStatsRef.current={started:now,count:0,renderMs:0};
           }
 
-          const displayGrid=getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : (fountainMode ? FOUNTAIN_GRID_SIZE : OR_TRANSFER_GRID_SIZE);
+          const displayGrid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
           const totalGroupsForUi=fountainMode
             ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/displayGrid))
             : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/displayGrid));
@@ -719,6 +719,6 @@ export function Transfer() {
         </div>
         {benchmark&&<div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.05] p-4"><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold uppercase tracking-[.14em] text-cyan-200">Physical 1 MB benchmark</p><span className="text-[10px] text-[var(--text-muted)]">{(benchmark.durationMs/1000).toFixed(1)} s</span></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"><div><p className="text-[10px] text-[var(--text-muted)]">Sustained</p><p className="text-sm font-black">{benchmark.goodputKbps.toFixed(1)} KB/s</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Peak ≥1s</p><p className="text-sm font-black">{benchmark.peakGoodputKbps.toFixed(1)} KB/s</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Codes/sec</p><p className="text-sm font-black">{benchmark.sustainedDecodeRate.toFixed(1)} / {benchmark.peakDecodeRate.toFixed(1)}</p></div><div><p className="text-[10px] text-[var(--text-muted)]">Unique codes</p><p className="text-sm font-black">{benchmark.uniqueCodes}</p></div></div><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-xl bg-white/5 p-3"><p className="text-[10px] text-[var(--text-muted)]">Decimen desktop→phone reference</p><p className="mt-1 text-xs font-bold">418.5 KB/s sustained · 601.5 KB/s peak</p></div><div className="rounded-xl bg-white/5 p-3"><p className="text-[10px] text-[var(--text-muted)]">Decimen phone→phone reference</p><p className="mt-1 text-xs font-bold">199.2 KB/s sustained · 340.8 KB/s peak</p></div></div><p className="mt-3 text-[10px] leading-5 text-[var(--text-muted)]">Run this on the actual device pair. The result is a measurement, not a simulated claim. To establish a “better than Decimen” result, repeat the same 1 MB, 10-second methodology on a comparable device pair and compare sustained and ≥1-second peak goodput.</p></div>}{progress&&<div className="mt-5 rounded-2xl bg-white/5 p-4"><p className="truncate text-sm font-bold">{progress.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{progress.mode==='fountain'?`${progress.received.toLocaleString()} unique droplets · ${progress.total.toLocaleString()} source blocks`:progress.mode==='multi-image'?`${progress.received} / ${progress.total} image frames`:`${progress.received} / ${progress.total} frames`}</p><div className="mt-3 h-2 rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all" style={{width:`${Math.min(100,Math.round(progress.received/progress.total*100))}%`}}/></div></div>}{result&&<div className="mt-5 rounded-2xl bg-emerald-400/10 p-4"><CheckCircle2 className="text-emerald-300"/><p className="mt-2 font-bold">File reconstructed & verified</p><p className="mt-1 truncate text-xs text-[var(--text-muted)]">{result.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{(result.size/1024/1024).toFixed(2)} MB · SHA-256 verified</p><a href={result.url} download={result.name} className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-slate-950"><Download size={14}/> Save file</a></div>}{error&&<p className="mt-5 rounded-2xl bg-rose-400/10 p-4 text-sm text-rose-200">{error}</p>}</div>
     </div>}
-    <div className="mt-5 grid gap-3 md:grid-cols-3">{[['01','Encode','The file becomes source blocks and optical droplets.'],['02','Stream','The sender uses 1/2/4 lanes depending on physical display size.'],['03','Recover','Missing frames are tolerated and SHA-256 verifies the result.']].map(([n,t,d])=><div key={n} className="glass-panel rounded-[24px] p-5"><span className="text-xs font-black text-cyan-300">{n}</span><h2 className="mt-2 font-bold">{t}</h2><p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">{d}</p></div>)}</div>
+    <div className="mt-5 grid gap-3 md:grid-cols-3">{[['01','Encode','The file becomes source blocks and optical droplets.'],['02','Stream','The MVP sender uses one optical lane; multi-lane transport is reserved for the optimization phase.'],['03','Recover','Missing frames are tolerated and SHA-256 verifies the result.']].map(([n,t,d])=><div key={n} className="glass-panel rounded-[24px] p-5"><span className="text-xs font-black text-cyan-300">{n}</span><h2 className="mt-2 font-bold">{t}</h2><p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">{d}</p></div>)}</div>
   </section>;
 }
