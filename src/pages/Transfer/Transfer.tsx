@@ -596,8 +596,7 @@ export function Transfer() {
     const centerSize=Math.max(1,Math.round(cropSize*cropScale));
     centerCanvas.width=centerSize;
     centerCanvas.height=centerSize;
-    centerCtx.imageSmoothingEnabled=true;
-    centerCtx.imageSmoothingQuality='high';
+    centerCtx.imageSmoothingEnabled=false;
     const sx=Math.floor((sourceWidth-cropSize)/2);
     const sy=Math.floor((sourceHeight-cropSize)/2);
     centerCtx.drawImage(video,sx,sy,cropSize,cropSize,0,0,centerSize,centerSize);
