@@ -96,7 +96,7 @@ export async function createTransfer(file: File) {
     mime: file.type || 'application/octet-stream',
     size: file.size,
     total,
-    getFrame: async (index: number) => {
+    getFrame: (index: number) => {
       if (!Number.isInteger(index) || index < 1 || index > total) {
         throw new Error('Transfer frame index is out of range.');
       }
