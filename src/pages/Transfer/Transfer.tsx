@@ -172,6 +172,9 @@ export function Transfer() {
   const compatAckFrontierRef=useRef(0);
   const compatAckSequenceRef=useRef(0);
   const ackCanvasRef=useRef<HTMLCanvasElement|null>(null);
+  const ackPublishTimerRef=useRef<number|null>(null);
+  const ackPendingPayloadRef=useRef<string|null>(null);
+  const ackLastPublishedAtRef=useRef(0);
   const resultUrlRef=useRef<string|null>(null);
 
   function getOpticalCanvasSize(canvas:HTMLCanvasElement){
@@ -649,6 +652,33 @@ export function Transfer() {
     if(feedbackVideoRef.current) feedbackVideoRef.current.srcObject=null;
   }
 
+  function publishAckPayload(payload:string,urgent=false){
+    const now=performance.now();
+    if(urgent || now-ackLastPublishedAtRef.current>=240){
+      if(ackPublishTimerRef.current!==null){
+        window.clearTimeout(ackPublishTimerRef.current);
+        ackPublishTimerRef.current=null;
+      }
+      ackPendingPayloadRef.current=null;
+      ackLastPublishedAtRef.current=now;
+      setAckPayload(payload);
+      return;
+    }
+
+    ackPendingPayloadRef.current=payload;
+    if(ackPublishTimerRef.current===null){
+      const wait=Math.max(20,Math.ceil(240-(now-ackLastPublishedAtRef.current)));
+      ackPublishTimerRef.current=window.setTimeout(()=>{
+        ackPublishTimerRef.current=null;
+        const pending=ackPendingPayloadRef.current;
+        ackPendingPayloadRef.current=null;
+        if(!pending)return;
+        ackLastPublishedAtRef.current=performance.now();
+        setAckPayload(pending);
+      },wait);
+    }
+  }
+
   function publishCompatibilityAck(frame:NonNullable<ReturnType<typeof parseTransferFrame>>,received:number,complete:boolean){
     if(!frame || !frame.total) return;
     const requiredBytes=Math.ceil(frame.total/8);
@@ -682,7 +712,7 @@ export function Transfer() {
       compatAckFirstMissingRef.current+=1;
     }
     compatAckSequenceRef.current+=1;
-    setAckPayload(createAckPayload({
+    const payload=createAckPayload({
       session:frame.session,
       mode:'compatibility',
       total:frame.total,
@@ -692,14 +722,15 @@ export function Transfer() {
       bitmap:compatAckBitmapRef.current,
       sequence:compatAckSequenceRef.current,
       state:complete?'complete':'streaming',
-    }));
+    });
+    publishAckPayload(payload,complete);
   }
 
   function publishFountainAck(frame:FountainDroplet,solved:number,complete:boolean){
     const bits=new Uint8Array(Math.ceil(Math.min(64,frame.blocks)/8));
     bits.fill(0xff);
     compatAckSequenceRef.current+=1;
-    setAckPayload(createAckPayload({
+    const payload=createAckPayload({
       session:frame.session,
       mode:'fountain',
       total:frame.blocks,
@@ -709,7 +740,8 @@ export function Transfer() {
       bitmap:bits,
       sequence:compatAckSequenceRef.current,
       state:complete?'complete':'streaming',
-    }));
+    });
+    publishAckPayload(payload,complete);
   }
 
   function stopPlayback(){
@@ -745,6 +777,12 @@ export function Transfer() {
     nativeInFlightRef.current=false;
     nativeDetectorRef.current=null;
     setReceiving(false);
+    if(ackPublishTimerRef.current!==null){
+      window.clearTimeout(ackPublishTimerRef.current);
+      ackPublishTimerRef.current=null;
+    }
+    ackPendingPayloadRef.current=null;
+    ackLastPublishedAtRef.current=0;
     if(!preserveAck) setAckPayload('');
   }
 
