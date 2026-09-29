@@ -167,6 +167,7 @@ export function Transfer() {
   const compatAckBitmapRef=useRef<Uint8Array|null>(null);
   const compatAckFirstMissingRef=useRef(1);
   const compatAckSessionRef=useRef<string|null>(null);
+  const compatAckFrontierRef=useRef(0);
   const compatAckSequenceRef=useRef(0);
   const ackCanvasRef=useRef<HTMLCanvasElement|null>(null);
   const resultUrlRef=useRef<string|null>(null);
@@ -643,12 +644,16 @@ export function Transfer() {
     if(compatAckSessionRef.current!==frame.session || !compatAckBitmapRef.current || compatAckBitmapRef.current.length!==requiredBytes){
       compatAckSessionRef.current=frame.session;
       compatAckBitmapRef.current=new Uint8Array(requiredBytes);
+      compatAckFrontierRef.current=0;
       compatAckSequenceRef.current=0;
       compatAckFirstMissingRef.current=1;
       void getTransferReceivedFrames(frame.session).then(indexes=>{
         const bitmap=compatAckBitmapRef.current;
         if(compatAckSessionRef.current!==frame.session || !bitmap) return;
-        for(const index of indexes) setAckBit(bitmap,index,true);
+        for(const index of indexes) {
+          setAckBit(bitmap,index,true);
+          compatAckFrontierRef.current=Math.max(compatAckFrontierRef.current,index);
+        }
         while(compatAckFirstMissingRef.current<=frame.total){
           const index=compatAckFirstMissingRef.current;
           if(!Boolean(bitmap[(index-1)>>>3] & (1<<((index-1)&7)))) break;
@@ -659,6 +664,7 @@ export function Transfer() {
       return;
     }
     setAckBit(compatAckBitmapRef.current,frame.index,true);
+    compatAckFrontierRef.current=Math.max(compatAckFrontierRef.current,frame.index);
     while(compatAckFirstMissingRef.current<=frame.total){
       const index=compatAckFirstMissingRef.current;
       if(!Boolean(compatAckBitmapRef.current[(index-1)>>>3] & (1<<((index-1)&7)))) break;
@@ -670,6 +676,7 @@ export function Transfer() {
       mode:'compatibility',
       total:frame.total,
       received,
+      frontier:compatAckFrontierRef.current,
       firstMissing:Math.min(frame.total,compatAckFirstMissingRef.current),
       bitmap:compatAckBitmapRef.current,
       sequence:compatAckSequenceRef.current,
@@ -686,6 +693,7 @@ export function Transfer() {
       mode:'fountain',
       total:frame.blocks,
       received:solved,
+      frontier:frame.blocks,
       firstMissing:1,
       bitmap:bits,
       sequence:compatAckSequenceRef.current,
@@ -1213,6 +1221,7 @@ export function Transfer() {
   async function startReceive(){
     setError('');setResult(null);setProgress(null);resetDecoder();
     compatAckBitmapRef.current=null;
+    compatAckFrontierRef.current=0;
     compatAckFirstMissingRef.current=1;
     compatAckSessionRef.current=null;
     compatAckSequenceRef.current=0;
