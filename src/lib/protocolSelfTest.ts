@@ -778,6 +778,7 @@ async function opticalAckRoundTrip() {
     mode: 'compatibility',
     total,
     received: 59,
+    frontier: 60,
     firstMissing: 60,
     bitmap,
     sequence: 7,
@@ -786,7 +787,7 @@ async function opticalAckRoundTrip() {
   const parsed = parseAckPayload(payload);
   assert(parsed, 'Optical ACK payload did not parse.');
   assert(parsed.session === 'ack-diagnostic' && parsed.total === 60, 'Optical ACK metadata mismatch.');
-  assert(parsed.received === 59 && parsed.sequence === 7, 'Optical ACK counters mismatch.');
+  assert(parsed.received === 59 && parsed.frontier === 60 && parsed.sequence === 7, 'Optical ACK counters mismatch.');
   const missing = getAckMissingIndexes(parsed);
   assert(missing.length === 1 && missing[0] === 60, 'Optical ACK bitmap did not surface missing frame #60.');
 
@@ -796,6 +797,7 @@ async function opticalAckRoundTrip() {
     mode: 'compatibility',
     total,
     received: 60,
+    frontier: 60,
     firstMissing: 60,
     bitmap,
     sequence: 8,
@@ -804,6 +806,25 @@ async function opticalAckRoundTrip() {
   const complete = parseAckPayload(completePayload);
   assert(complete?.state === 'complete', 'Optical ACK completion state did not round-trip.');
   assert(getAckMissingIndexes(complete).length === 0, 'Optical ACK still reported a missing frame after completion.');
+
+  // Regression: a window may contain future frames, but those must not be
+  // surfaced as missing until the receiver has observed them.
+  const partialBitmap = new Uint8Array(8);
+  for (let index = 1; index <= 3; index += 1) setAckBit(partialBitmap, index, true);
+  const partialPayload = createAckPayload({
+    session: 'ack-frontier-diagnostic',
+    mode: 'compatibility',
+    total: 60,
+    received: 3,
+    frontier: 3,
+    firstMissing: 4,
+    bitmap: partialBitmap,
+    sequence: 1,
+    state: 'streaming',
+  });
+  const partial = parseAckPayload(partialPayload);
+  assert(partial, 'Frontier ACK diagnostic did not parse.');
+  assert(getAckMissingIndexes(partial).length === 0, 'ACK frontier incorrectly reported unseen future frames as missing.');
   return '59/60 bitmap surfaced frame #60 · completion ACK cleared the missing set';
 }
 
