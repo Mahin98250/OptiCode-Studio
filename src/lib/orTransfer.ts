@@ -1,10 +1,13 @@
 import { clearSession, getChunkIndexes, getChunks, getSession, putChunkAndCount, putSession } from './sessionStore';
 
 export const OR_TRANSFER_PREFIX = 'ORX1:';
-// Conservative MVP payload: smaller QR symbols are substantially easier for phone cameras to acquire reliably.
-// Throughput optimization comes only after physical transfer is proven.
+export const OR_TRANSFER_DENSE_PREFIX = 'ORX2:';
+// Conservative legacy payload. ORX1 remains wire-compatible with the original
+// sequential receiver while ORX2 explicitly carries its density profile.
 export const OR_TRANSFER_CHUNK_CHARS = 300;
 export const OR_TRANSFER_BYTES_PER_FRAME = Math.floor((OR_TRANSFER_CHUNK_CHARS / 4) * 3);
+export const OR_TRANSFER_DENSE_BYTES_PER_FRAME = 360;
+export const OR_TRANSFER_MAX_BYTES_PER_FRAME = OR_TRANSFER_DENSE_BYTES_PER_FRAME;
 // High-speed optical transfer: each displayed frame can carry multiple independent QR symbols.
 // Keep optical payloads comfortably below QR version 40-L capacity so phone cameras have more decoding margin.
 export const OR_TRANSFER_GRID_SIZE = 4;
@@ -56,6 +59,7 @@ type TransferSession = {
   size: number;
   hash: string;
   total: number;
+  bytesPerFrame?: number;
   createdAt: number;
 };
 
@@ -67,10 +71,11 @@ export type TransferFrame = {
   hash:string;
   index:number;
   total:number;
+  bytesPerFrame:number;
   data:string;
 };
 
-export async function createTransfer(file: File) {
+export async function createTransfer(file: File, options: { bytesPerFrame?: number } = {}) {
   if (file.size > OR_TRANSFER_MAX_FILE_SIZE) throw new Error('Choose a file smaller than 100 MB.');
 
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -78,8 +83,14 @@ export async function createTransfer(file: File) {
   const session = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
   // Generate frames on demand so the sender does not hold every QR payload
-  // in memory at once.
-  const bytesPerFrame = OR_TRANSFER_BYTES_PER_FRAME;
+  // in memory at once. The dense profile stays bounded so QR size does not
+  // grow without limit.
+  const requestedBytes = Math.floor(options.bytesPerFrame ?? OR_TRANSFER_DENSE_BYTES_PER_FRAME);
+  const bytesPerFrame = Math.max(
+    OR_TRANSFER_BYTES_PER_FRAME,
+    Math.min(OR_TRANSFER_MAX_BYTES_PER_FRAME, requestedBytes),
+  );
+  const useLegacyWire = bytesPerFrame === OR_TRANSFER_BYTES_PER_FRAME;
   const total = Math.max(1, Math.ceil(file.size / bytesPerFrame));
 
   if (total > MAX_TRANSFER_FRAMES) {
@@ -96,6 +107,7 @@ export async function createTransfer(file: File) {
     mime: file.type || 'application/octet-stream',
     size: file.size,
     total,
+    bytesPerFrame,
     getFrame: (index: number) => {
       if (!Number.isInteger(index) || index < 1 || index > total) {
         throw new Error('Transfer frame index is out of range.');
@@ -109,24 +121,30 @@ export async function createTransfer(file: File) {
       const chunk = bytes.subarray(start, end);
       const encoded = toBase64(chunk);
 
-      return `${OR_TRANSFER_PREFIX}${session}|${mime}|${encodedName}|${file.size}|${hash}|${index}|${total}|${encoded}`;
+      if (useLegacyWire) {
+        return `${OR_TRANSFER_PREFIX}${session}|${mime}|${encodedName}|${file.size}|${hash}|${index}|${total}|${encoded}`;
+      }
+      return `${OR_TRANSFER_DENSE_PREFIX}${session}|${mime}|${encodedName}|${file.size}|${hash}|${index}|${total}|${bytesPerFrame}|${encoded}`;
     },
   };
 }
 
 export function isTransferFrame(value:string) {
-  return value.startsWith(OR_TRANSFER_PREFIX);
+  return value.startsWith(OR_TRANSFER_PREFIX) || value.startsWith(OR_TRANSFER_DENSE_PREFIX);
 }
 
 export function parseTransferFrame(value:string): TransferFrame | null {
   const parts=value.split('|');
-  if (!isTransferFrame(value) || parts.length !== 8) return null;
+  const dense=value.startsWith(OR_TRANSFER_DENSE_PREFIX);
+  if (!isTransferFrame(value) || (dense ? parts.length !== 9 : parts.length !== 8)) return null;
 
-  const [sessionRaw,mimeRaw,nameRaw,sizeRaw,hash,indexRaw,totalRaw,data]=parts;
-  const session=sessionRaw.slice(OR_TRANSFER_PREFIX.length);
+  const [sessionRaw,mimeRaw,nameRaw,sizeRaw,hash,indexRaw,totalRaw,denseBytesRaw,dataRaw]=parts;
+  const session=sessionRaw.slice(dense ? OR_TRANSFER_DENSE_PREFIX.length : OR_TRANSFER_PREFIX.length);
   const index=Number(indexRaw);
   const total=Number(totalRaw);
   const size=Number(sizeRaw);
+  const bytesPerFrame=dense ? Number(denseBytesRaw) : OR_TRANSFER_BYTES_PER_FRAME;
+  const data=dense ? dataRaw : denseBytesRaw;
 
   if (
     !session ||
@@ -142,16 +160,19 @@ export function parseTransferFrame(value:string): TransferFrame | null {
     total > MAX_TRANSFER_FRAMES ||
     size < 0 ||
     size > OR_TRANSFER_MAX_FILE_SIZE ||
-    (data.length > OR_TRANSFER_CHUNK_CHARS) ||
+    !Number.isInteger(bytesPerFrame) ||
+    bytesPerFrame < OR_TRANSFER_BYTES_PER_FRAME ||
+    bytesPerFrame > OR_TRANSFER_MAX_BYTES_PER_FRAME ||
+    (data.length > Math.ceil((bytesPerFrame * 4) / 3)) ||
     (data.length === 0 && !(total === 1 && index === 1))
   ) return null;
 
-  const expectedTotal = Math.max(1, Math.ceil(size / OR_TRANSFER_BYTES_PER_FRAME));
+  const expectedTotal = Math.max(1, Math.ceil(size / bytesPerFrame));
   if (total !== expectedTotal) return null;
 
   const expectedBytes = Math.min(
-    OR_TRANSFER_BYTES_PER_FRAME,
-    Math.max(0, size - (index - 1) * OR_TRANSFER_BYTES_PER_FRAME),
+    bytesPerFrame,
+    Math.max(0, size - (index - 1) * bytesPerFrame),
   );
   const expectedBase64Length = expectedBytes === 0 ? 0 : 4 * Math.ceil(expectedBytes / 3);
   if (data.length !== expectedBase64Length) return null;
@@ -165,6 +186,7 @@ export function parseTransferFrame(value:string): TransferFrame | null {
       hash,
       index,
       total,
+      bytesPerFrame,
       data,
     };
   } catch {
@@ -206,6 +228,7 @@ export async function addTransferFrame(frame:TransferFrame) {
     current.hash===frame.hash &&
     current.total===frame.total &&
     current.size===frame.size &&
+    (current.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME)===frame.bytesPerFrame &&
     current.mime===frame.mime &&
     current.name===frame.name;
 
@@ -220,6 +243,7 @@ export async function addTransferFrame(frame:TransferFrame) {
       size:frame.size,
       hash:frame.hash,
       total:frame.total,
+      bytesPerFrame:frame.bytesPerFrame,
       createdAt:Date.now(),
     };
 
