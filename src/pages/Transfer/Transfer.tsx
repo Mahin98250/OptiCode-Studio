@@ -6,10 +6,10 @@ import { Link } from 'react-router-dom';
 import { QrDecodePool } from '../../lib/qrDecodePool';
 import { createBenchmarkStart, finishBenchmark, type BenchmarkSample, type OpticalBenchmark } from '../../lib/opticalBenchmark';
 import { addTransferFrame, createTransfer, getTransferReceivedFrames, isTransferFrame, parseTransferFrame, reconstructTransfer, OR_TRANSFER_BYTES_PER_FRAME, OR_TRANSFER_DENSE_BYTES_PER_FRAME } from '../../lib/orTransfer';
-import { createAckFile per screen, getAckMissingIndexes, parseAckFile per screen, setAckBit } from '../../lib/opticalControl';
+import { createAckPayload, getAckMissingIndexes, parseAckPayload, setAckBit } from '../../lib/opticalControl';
 import { createQrMatrices, drawQrMatricesToCanvas } from '../../lib/qrCanvas';
 import { QrEncodePool, type QrEncodeResult } from '../../lib/qrEncodePool';
-import { createExtra recoveryReading, createExtra recoveryTransfer, FOUNTAIN_BLOCK_BYTES, FOUNTAIN_GRID_SIZE, isExtra recoveryFrame, parseExtra recoveryFrame, type Extra recoveryReading, type Extra recoveryDroplet, type Extra recoveryPlan } from '../../lib/fountain';
+import { createFountainDecoder, createFountainTransfer, FOUNTAIN_BLOCK_BYTES, FOUNTAIN_GRID_SIZE, isFountainFrame, parseFountainFrame, type FountainDecoder, type FountainDroplet, type FountainPlan } from '../../lib/fountain';
 import { addMultiImageChunk, isMultiImageQr, reconstructMultiImage } from '../../lib/imageQr';
 import type { QrMatrix } from '../../lib/qrEncodePool';
 
@@ -76,7 +76,7 @@ export function Transfer() {
   const [mode,setMode]=useState<'fountain'|'compatibility'>('compatibility');
   const [transferDensity,setTransferDensity]=useState<'legacy'|'dense'>('dense');
   const [file,setFile]=useState<File|null>(null);
-  const [fountain,setExtra recovery]=useState<Extra recoveryPlan|null>(null);
+  const [fountain,setFountain]=useState<FountainPlan|null>(null);
   const [compat,setCompat]=useState<Awaited<ReturnType<typeof createTransfer>>|null>(null);
   const [group,setGroup]=useState(0);
   const [playing,setPlaying]=useState(false);
@@ -102,7 +102,7 @@ export function Transfer() {
   const [feedbackMissing,setFeedbackMissing]=useState<number[]>([]);
   const [feedbackState,setFeedbackState]=useState<'searching'|'connected'|'complete'|'unavailable'>('searching');
   const [feedbackLastAt,setFeedbackLastAt]=useState<number|null>(null);
-  const [ackFile per screen,setAckFile per screen]=useState('');
+  const [ackPayload,setAckPayload]=useState('');
   const inputRef=useRef<HTMLInputElement>(null);
   const videoRef=useRef<HTMLVideoElement>(null);
   const streamRef=useRef<MediaStream|null>(null);
@@ -115,15 +115,15 @@ export function Transfer() {
   const playbackGroupRef=useRef(0);
   const playbackRepeatRef=useRef(0);
   const playbackPlanKeyRef=useRef<string | null>(null);
-  const playbackExtra recoveryRef=useRef(false);
+  const playbackFountainRef=useRef(false);
   const playbackPrefetchRef=useRef<Set<string>>(new Set());
   const qrEncoderRef=useRef<QrEncodePool|null>(null);
   const qrCanvasRef=useRef<HTMLCanvasElement|null>(null);
   const renderCacheRef=useRef<Map<string,{matrices:QrMatrix[];renderMs:number;encodeMs:number}>>(new Map());
   const renderEpochRef=useRef(0);
   const renderWindowStatsRef=useRef({started:0,count:0,renderMs:0});
-  const fountainReadingRef=useRef<Extra recoveryReading|null>(null);
-  const fountainMetaRef=useRef<Extra recoveryDroplet|null>(null);
+  const fountainReadingRef=useRef<FountainDecoder|null>(null);
+  const fountainMetaRef=useRef<FountainDroplet|null>(null);
   const compatibilitySessionRef=useRef<string|null>(null);
   const recentRef=useRef<Map<string,number>>(new Map());
   const renderCountRef=useRef(0);
@@ -185,7 +185,7 @@ export function Transfer() {
   const compatAckSequenceRef=useRef(0);
   const ackCanvasRef=useRef<HTMLCanvasElement|null>(null);
   const ackPublishTimerRef=useRef<number|null>(null);
-  const ackPendingFile per screenRef=useRef<string|null>(null);
+  const ackPendingPayloadRef=useRef<string|null>(null);
   const ackLastPublishedAtRef=useRef(0);
   const opticalCanvasSizeRef=useRef(900);
   const resultUrlRef=useRef<string|null>(null);
@@ -243,9 +243,9 @@ export function Transfer() {
   },[]);
 
   useEffect(()=>{
-    if(!ackFile per screen || !ackCanvasRef.current) return;
-    try{drawQrMatricesToCanvas(ackCanvasRef.current,createQrMatrices([ackFile per screen]),280,12);}catch{}
-  },[ackFile per screen]);
+    if(!ackPayload || !ackCanvasRef.current) return;
+    try{drawQrMatricesToCanvas(ackCanvasRef.current,createQrMatrices([ackPayload]),280,12);}catch{}
+  },[ackPayload]);
 
   async function setScreenWakeLock(active:boolean){
     if(!active){
@@ -293,12 +293,12 @@ export function Transfer() {
         // entire transfer screen for every optical frame.
         const planKey=playbackPlanKeyRef.current;
         if(planKey){
-          const fountainMode=playbackExtra recoveryRef.current;
+          const fountainMode=playbackFountainRef.current;
           const plan=fountainMode ? fountain : compat;
           if(plan && qrCanvasRef.current){
             const grid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
             const totalGroups=fountainMode
-              ? Math.max(1,Math.ceil((plan as Extra recoveryPlan).recommended/grid))
+              ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/grid))
               : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/grid));
             const missingSet=feedbackMissingSetRef.current;
             if(!fountainMode && feedbackEnabled && feedbackConnected && feedbackRetryIndexRef.current===null && missingSet.size>0){
@@ -338,7 +338,7 @@ export function Transfer() {
               }
             } else if(!playbackPrefetchRef.current.has(cacheKey)) {
               playbackPrefetchRef.current.add(cacheKey);
-              void buildScreen updateGroup(planKey,plan,nextGroup,fountainMode)
+              void buildRenderGroup(planKey,plan,nextGroup,fountainMode)
                 .finally(()=>playbackPrefetchRef.current.delete(cacheKey))
                 .catch(()=>{});
             }
@@ -358,22 +358,22 @@ export function Transfer() {
     };
   },[playing,intervalMs,fountain,compat]);
 
-  function clearScreen updatePipeline(){
+  function clearRenderPipeline(){
     renderEpochRef.current+=1;
     renderCacheRef.current.clear();
     renderWindowStatsRef.current={started:0,count:0,renderMs:0};
     setTelemetry(prev=>({...prev,prefetchReady:0,encodeMs:0,renderMs:0,renderCount:0,renderFps:0}));
   }
 
-  async function buildScreen updateGroup(
+  async function buildRenderGroup(
     planKey:string,
-    plan:Extra recoveryPlan|Awaited<ReturnType<typeof createTransfer>>,
+    plan:FountainPlan|Awaited<ReturnType<typeof createTransfer>>,
     groupIndex:number,
     fountainMode:boolean,
   ){
     const grid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
     const totalGroups=fountainMode
-      ? Math.max(1,Math.ceil((plan as Extra recoveryPlan).recommended/grid))
+      ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/grid))
       : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/grid));
     const current=fountainMode ? groupIndex : groupIndex%totalGroups;
     const key=planKey+':'+current;
@@ -387,7 +387,7 @@ export function Transfer() {
     const renderStart=performance.now();
     const values:string[]=[];
     for(let lane=0;lane<grid;lane+=1){
-      if(fountainMode) values.push(await (plan as Extra recoveryPlan).getDroplet(lane,groupIndex,grid as 1 | 2 | 4));
+      if(fountainMode) values.push(await (plan as FountainPlan).getDroplet(lane,groupIndex,grid as 1 | 2 | 4));
       else{
         const index=current*grid+lane+1;
         const compatPlan=plan as Awaited<ReturnType<typeof createTransfer>>;
@@ -420,22 +420,22 @@ export function Transfer() {
   useEffect(()=>{
     let cancelled=false;
     const plan=fountain ?? compat;
-    if(!plan){ clearScreen updatePipeline(); return; }
+    if(!plan){ clearRenderPipeline(); return; }
 
     const epoch=++renderEpochRef.current;
     const fountainMode=Boolean(fountain);
     const planKey=fountainMode
-      ? 'f:'+(fountain as Extra recoveryPlan).session
+      ? 'f:'+(fountain as FountainPlan).session
       : 'c:'+(compat as Awaited<ReturnType<typeof createTransfer>>).session;
     playbackPlanKeyRef.current=planKey;
     playbackPrefetchRef.current.clear();
-    playbackExtra recoveryRef.current=fountainMode;
+    playbackFountainRef.current=fountainMode;
     const startGroup=playbackGroupRef.current;
     const groupIndices=[startGroup,startGroup+1,startGroup+2,startGroup+3,startGroup+4,startGroup+5];
 
     const loadGroup=async(index:number,display=false)=>{
       try{
-        const entry=await buildScreen updateGroup(planKey,plan,index,fountainMode);
+        const entry=await buildRenderGroup(planKey,plan,index,fountainMode);
         if(cancelled || epoch!==renderEpochRef.current)return;
         if(display){
           renderCountRef.current+=1;
@@ -447,7 +447,7 @@ export function Transfer() {
           const windowMs=now-renderWindowStatsRef.current.started;
           if(windowMs>=1500){
             const fps=renderWindowStatsRef.current.count/(windowMs/1000);
-            const avgScreen update=renderWindowStatsRef.current.renderMs/Math.max(1,renderWindowStatsRef.current.count);
+            const avgRender=renderWindowStatsRef.current.renderMs/Math.max(1,renderWindowStatsRef.current.count);
             if(autoTune){
               // Closed-loop optical governor. Compatibility mode accelerates
               // only with a fresh receiver ACK and no reported gaps; stale ACK
@@ -457,12 +457,12 @@ export function Transfer() {
                 const gaps=feedbackMissingSetRef.current.size;
                 if(gaps>0 || ackAge>1400){
                   if(intervalMs<1300)setIntervalMs(v=>Math.min(1300,v+50));
-                }else if(ackAge<900 && avgScreen update<16 && fps>30 && intervalMs>300){
+                }else if(ackAge<900 && avgRender<16 && fps>30 && intervalMs>300){
                   setIntervalMs(v=>Math.max(300,v-25));
                 }
               }else if(fountainMode){
-                if(avgScreen update<9 && fps>45 && intervalMs>120)setIntervalMs(v=>Math.max(120,v-10));
-                else if(avgScreen update>42 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+25));
+                if(avgRender<9 && fps>45 && intervalMs>120)setIntervalMs(v=>Math.max(120,v-10));
+                else if(avgRender>42 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+25));
               }
             }
             renderWindowStatsRef.current={started:now,count:0,renderMs:0};
@@ -470,7 +470,7 @@ export function Transfer() {
 
           const displayGrid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
           const totalGroupsForUi=fountainMode
-            ? Math.max(1,Math.ceil((plan as Extra recoveryPlan).recommended/displayGrid))
+            ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/displayGrid))
             : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/displayGrid));
           const ready=groupIndices.filter(next=>{
             const resolved=fountainMode ? next : next%totalGroupsForUi;
@@ -511,15 +511,15 @@ export function Transfer() {
     playbackGroupRef.current=0;
     const fountainMode=Boolean(fountain);
     const planKey=fountainMode
-      ? 'f:'+(fountain as Extra recoveryPlan).session
+      ? 'f:'+(fountain as FountainPlan).session
       : 'c:'+(compat as Awaited<ReturnType<typeof createTransfer>>).session;
 
     playbackPlanKeyRef.current=planKey;
-    playbackExtra recoveryRef.current=fountainMode;
+    playbackFountainRef.current=fountainMode;
     playbackPrefetchRef.current.clear();
 
     try{
-      const entry=await buildScreen updateGroup(planKey,plan,0,fountainMode);
+      const entry=await buildRenderGroup(planKey,plan,0,fountainMode);
       if(playbackPlanKeyRef.current!==planKey) return;
       if(qrCanvasRef.current) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,getOpticalCanvasSize(),18);
       playbackRepeatRef.current=0;
@@ -545,7 +545,7 @@ export function Transfer() {
   }
 
   function applyFeedbackAck(value:string){
-    const ack=parseAckFile per screen(value);
+    const ack=parseAckPayload(value);
     const activePlan=compat ?? fountain;
     if(!ack || !activePlan || ack.sequence<=feedbackLastAckSeqRef.current || ack.session!==activePlan.session) return false;
 
@@ -679,29 +679,29 @@ export function Transfer() {
     if(feedbackVideoRef.current) feedbackVideoRef.current.srcObject=null;
   }
 
-  function publishAckFile per screen(payload:string,urgent=false){
+  function publishAckPayload(payload:string,urgent=false){
     const now=performance.now();
     if(urgent || now-ackLastPublishedAtRef.current>=240){
       if(ackPublishTimerRef.current!==null){
         window.clearTimeout(ackPublishTimerRef.current);
         ackPublishTimerRef.current=null;
       }
-      ackPendingFile per screenRef.current=null;
+      ackPendingPayloadRef.current=null;
       ackLastPublishedAtRef.current=now;
-      setAckFile per screen(payload);
+      setAckPayload(payload);
       return;
     }
 
-    ackPendingFile per screenRef.current=payload;
+    ackPendingPayloadRef.current=payload;
     if(ackPublishTimerRef.current===null){
       const wait=Math.max(20,Math.ceil(240-(now-ackLastPublishedAtRef.current)));
       ackPublishTimerRef.current=window.setTimeout(()=>{
         ackPublishTimerRef.current=null;
-        const pending=ackPendingFile per screenRef.current;
-        ackPendingFile per screenRef.current=null;
+        const pending=ackPendingPayloadRef.current;
+        ackPendingPayloadRef.current=null;
         if(!pending)return;
         ackLastPublishedAtRef.current=performance.now();
-        setAckFile per screen(pending);
+        setAckPayload(pending);
       },wait);
     }
   }
@@ -739,7 +739,7 @@ export function Transfer() {
       compatAckFirstMissingRef.current+=1;
     }
     compatAckSequenceRef.current+=1;
-    const payload=createAckFile per screen({
+    const payload=createAckPayload({
       session:frame.session,
       mode:'compatibility',
       total:frame.total,
@@ -750,14 +750,14 @@ export function Transfer() {
       sequence:compatAckSequenceRef.current,
       state:complete?'complete':'streaming',
     });
-    publishAckFile per screen(payload,complete);
+    publishAckPayload(payload,complete);
   }
 
-  function publishExtra recoveryAck(frame:Extra recoveryDroplet,solved:number,complete:boolean){
+  function publishFountainAck(frame:FountainDroplet,solved:number,complete:boolean){
     const bits=new Uint8Array(Math.ceil(Math.min(64,frame.blocks)/8));
     bits.fill(0xff);
     compatAckSequenceRef.current+=1;
-    const payload=createAckFile per screen({
+    const payload=createAckPayload({
       session:frame.session,
       mode:'fountain',
       total:frame.blocks,
@@ -768,7 +768,7 @@ export function Transfer() {
       sequence:compatAckSequenceRef.current,
       state:complete?'complete':'streaming',
     });
-    publishAckFile per screen(payload,complete);
+    publishAckPayload(payload,complete);
   }
 
   function stopPlayback(){
@@ -808,9 +808,9 @@ export function Transfer() {
       window.clearTimeout(ackPublishTimerRef.current);
       ackPublishTimerRef.current=null;
     }
-    ackPendingFile per screenRef.current=null;
+    ackPendingPayloadRef.current=null;
     ackLastPublishedAtRef.current=0;
-    if(!preserveAck) setAckFile per screen('');
+    if(!preserveAck) setAckPayload('');
   }
 
   async function startZxingAssist(){
@@ -1105,15 +1105,15 @@ export function Transfer() {
 
   async function choose(value?:File, density: 'legacy' | 'dense' = transferDensity){
     if(!value)return;
-    setError(''); setResult(null); stopPlayback(); playbackGroupRef.current=0; setGroup(0); resetReading(); clearScreen updatePipeline(); receiverStartedRef.current=null; solvedRef.current=0; decodedBytesRef.current=0; duplicateCountRef.current=0; detectedWindowRef.current={started:0,count:0}; renderWindowRef.current={started:0,count:0};
+    setError(''); setResult(null); stopPlayback(); playbackGroupRef.current=0; setGroup(0); resetReading(); clearRenderPipeline(); receiverStartedRef.current=null; solvedRef.current=0; decodedBytesRef.current=0; duplicateCountRef.current=0; detectedWindowRef.current={started:0,count:0}; renderWindowRef.current={started:0,count:0};
     try{
       if(mode==='fountain'){
-        const plan=await createExtra recoveryTransfer(value); setExtra recovery(plan); setCompat(null);
+        const plan=await createFountainTransfer(value); setFountain(plan); setCompat(null);
       }else{
-        const plan=await createTransfer(value,{bytesPerFrame:density==='dense'?OR_TRANSFER_DENSE_BYTES_PER_FRAME:OR_TRANSFER_BYTES_PER_FRAME}); setCompat(plan); setExtra recovery(null);
+        const plan=await createTransfer(value,{bytesPerFrame:density==='dense'?OR_TRANSFER_DENSE_BYTES_PER_FRAME:OR_TRANSFER_BYTES_PER_FRAME}); setCompat(plan); setFountain(null);
       }
       setFile(value);
-    }catch(e){setFile(null);setExtra recovery(null);setCompat(null);setError(e instanceof Error?e.message:'Unable to prepare this file.');}
+    }catch(e){setFile(null);setFountain(null);setCompat(null);setError(e instanceof Error?e.message:'Unable to prepare this file.');}
   }
 
   async function finishBenchmarkRun(){
@@ -1181,8 +1181,8 @@ export function Transfer() {
       }
       return;
     }
-    if(isExtra recoveryFrame(value)){
-      const frame=parseExtra recoveryFrame(value); if(!frame)return;
+    if(isFountainFrame(value)){
+      const frame=parseFountainFrame(value); if(!frame)return;
       const activeMeta=fountainMetaRef.current;
       const sessionChanged=Boolean(activeMeta && (
         activeMeta.session !== frame.session ||
@@ -1192,7 +1192,7 @@ export function Transfer() {
       ));
       if(!fountainReadingRef.current || sessionChanged){
         fountainMetaRef.current=frame;
-        fountainReadingRef.current=createExtra recoveryReading(frame);
+        fountainReadingRef.current=createFountainDecoder(frame);
         solvedRef.current=0;
         decodedBytesRef.current=0;
         setProgress(null);
@@ -1202,7 +1202,7 @@ export function Transfer() {
       solvedRef.current=d.solved;
       decodedBytesRef.current=Math.min(frame.size,d.solved*frame.blockBytes);
       setProgress({mode:'fountain',session:frame.session,name:frame.name,received:d.solved,total:frame.blocks,duplicates:duplicateCountRef.current});
-      publishExtra recoveryAck(frame,d.solved,d.complete);
+      publishFountainAck(frame,d.solved,d.complete);
       if(d.complete){
         const rebuilt=await fountainReadingRef.current.reconstruct();
         if(rebuilt){
@@ -1296,13 +1296,13 @@ export function Transfer() {
         // baseline made jsQR spend ~1.3s on a single acquisition on this phone.
         // A smaller centered ROI reduces pixel work while preserving the QR's
         // module resolution. Full-frame recovery is deliberately occasional.
-        const useCenterMissed parts=misses%4!==3;
+        const useCenterRecovery=misses%4!==3;
 
         let image:ImageData;
         let width:number;
         let height:number;
 
-        if(useCenterMissed parts){
+        if(useCenterRecovery){
           const cropSize=Math.min(sourceWidth,sourceHeight);
           const target=720;
           const scale=Math.min(1,target/cropSize);
@@ -1348,7 +1348,7 @@ export function Transfer() {
             const processStarted=performance.now();
             qrDetectionsRef.current+=decoded.values.length;
             if(decoded.values.length>0){
-              const guideBoxes=(decoded.boxes ?? []).map(box=>useCenterMissed parts
+              const guideBoxes=(decoded.boxes ?? []).map(box=>useCenterRecovery
                 ? {
                     x:Math.floor((sourceWidth-Math.min(sourceWidth,sourceHeight))/2 + (box.x/Math.max(1,width))*Math.min(sourceWidth,sourceHeight)),
                     y:Math.floor((sourceHeight-Math.min(sourceWidth,sourceHeight))/2 + (box.y/Math.max(1,height))*Math.min(sourceWidth,sourceHeight)),
@@ -1425,7 +1425,7 @@ export function Transfer() {
     lastGuideBoxRef.current=null;
     guideStableCountRef.current=0;
     setOpticalGuide({tone:'searching',title:'Looking for the sender screen…',detail:'Point your camera at the QR stream.',quality:0});
-    setAckFile per screen('');
+    setAckPayload('');
     receiverStartedRef.current=null;solvedRef.current=0;duplicateCountRef.current=0;
     detectedWindowRef.current={started:0,count:0};scanDelayRef.current=55;
     cameraFramesRef.current=0;decoderCallsRef.current=0;qrDetectionsRef.current=0;acceptedTransferFramesRef.current=0;lastDetectionRef.current='—';telemetryTickRef.current=0;
@@ -1526,8 +1526,8 @@ export function Transfer() {
     {tab==='send' ? <div className="mt-5 grid gap-5 lg:grid-cols-[.8fr_1.2fr]">
       <div className="glass-panel rounded-[28px] p-5">
         <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/5 p-1">
-          <button onClick={()=>{stopPlayback();setMode('fountain');setExtra recovery(null);setCompat(null);setFile(null);}} className={`rounded-xl px-3 py-3 text-xs font-bold ${mode==='fountain'?'bg-cyan-300 text-slate-950':'text-[var(--text-muted)]'}`}>Faster sharing</button>
-          <button onClick={()=>{stopPlayback();setMode('compatibility');setExtra recovery(null);setCompat(null);setFile(null);}} className={`rounded-xl px-3 py-3 text-xs font-bold ${mode==='compatibility'?'bg-white text-slate-950':'text-[var(--text-muted)]'}`}>Simple sharing</button>
+          <button onClick={()=>{stopPlayback();setMode('fountain');setFountain(null);setCompat(null);setFile(null);}} className={`rounded-xl px-3 py-3 text-xs font-bold ${mode==='fountain'?'bg-cyan-300 text-slate-950':'text-[var(--text-muted)]'}`}>Faster sharing</button>
+          <button onClick={()=>{stopPlayback();setMode('compatibility');setFountain(null);setCompat(null);setFile(null);}} className={`rounded-xl px-3 py-3 text-xs font-bold ${mode==='compatibility'?'bg-white text-slate-950':'text-[var(--text-muted)]'}`}>Simple sharing</button>
         </div>
         <input ref={inputRef} type="file" className="sr-only" onChange={e=>{void choose(e.target.files?.[0]);e.currentTarget.value='';}}/>
         <button onClick={()=>inputRef.current?.click()} className="mt-4 w-full rounded-[24px] border border-dashed border-cyan-300/30 bg-cyan-300/[.05] p-8 text-center"><FileUp className="mx-auto text-cyan-300" size={30}/><p className="mt-3 font-bold">Choose any file</p><p className="mt-1 text-xs text-[var(--text-muted)]">{mode==='fountain'?'Up to 64 MB · extra recovery':'Up to 100 MB · simple recovery'}</p></button>
@@ -1541,8 +1541,8 @@ export function Transfer() {
       </div>
       <div className="glass-panel rounded-[28px] p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-cyan-300">Sharing screen</p><p className="mt-1 text-sm text-[var(--text-muted)]">{fountain?'Fast sharing mode':compat?'Simple sharing compatibility stream':'Choose a file to begin'}</p></div>{(fountain||compat)&&<div className="flex gap-2"><button onClick={()=>{void enterTransferFullscreen();}} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-black text-cyan-200">Fullscreen QR</button><button onClick={()=>{if(playing)stopPlayback();else void startPlayback();}} className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950">{playing?'Pause':'Start sharing'}</button></div>}</div>
-        {(fountain||compat)?<canvas ref={qrCanvasRef} width={900} height={900} aria-label="OptiTransfer QR stream" className="transfer-canvas mx-auto mt-5 aspect-square w-full max-w-[760px] min-h-[min(72vh,760px)] rounded-2xl bg-white p-1 sm:p-2" style={{imageScreen updateing:'crisp-edges'}}/>:<div className="mt-5 grid aspect-square place-items-center rounded-2xl bg-black/20 text-sm text-[var(--text-muted)]">QR stream preview</div>}
-        {(compat||fountain)&&<button type="button" onClick={()=>setShowAdvanced(value=>!value)} className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] px-4 py-3 text-left text-xs font-bold text-[var(--text)]">${showAdvanced ? "Hide extra options" : "More options"}<span className="ml-2 text-[var(--text-muted)]">${showAdvanced ? "Less settings" : "Speed, feedback and other settings"}</span></button>}
+        {(fountain||compat)?<canvas ref={qrCanvasRef} width={900} height={900} aria-label="OptiTransfer QR stream" className="transfer-canvas mx-auto mt-5 aspect-square w-full max-w-[760px] min-h-[min(72vh,760px)] rounded-2xl bg-white p-1 sm:p-2" style={{imageRendering:'crisp-edges'}}/>:<div className="mt-5 grid aspect-square place-items-center rounded-2xl bg-black/20 text-sm text-[var(--text-muted)]">QR stream preview</div>}
+        {(compat||fountain)&&<button type="button" onClick={()=>setShowAdvanced(value=>!value)} className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] px-4 py-3 text-left text-xs font-bold text-[var(--text)]">{showAdvanced ? "Hide extra options" : "More options"}<span className="ml-2 text-[var(--text-muted)]">{showAdvanced ? "Less settings" : "Speed, feedback and other settings"}</span></button>}
         {showAdvanced&&<>
         {(compat||fountain)&&<div className="mt-4 rounded-2xl bg-white/5 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1564,7 +1564,7 @@ export function Transfer() {
         </>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
-      <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><div className="relative overflow-hidden rounded-2xl bg-black"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-contain sm:min-h-[560px]"/>{receiving&&<div className="pointer-events-none absolute inset-0"><div className="absolute inset-0 grid place-items-center"><div className={`relative aspect-square w-[72%] max-w-[560px] rounded-[28px] border-2 transition-colors duration-300 ${opticalGuide.tone==='ready'?'border-emerald-300 shadow-[0_0_32px_rgba(52,211,153,.28)]':opticalGuide.tone==='closer'||opticalGuide.tone==='farther'?'border-amber-300 shadow-[0_0_32px_rgba(251,191,36,.22)]':'border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]'}`}><span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/75 px-3 py-1.5 text-[10px] font-black text-white">{opticalGuide.title}</span></div></div><div className="absolute bottom-4 left-1/2 w-[min(92%,440px)] -translate-x-1/2 rounded-2xl border border-white/15 bg-black/75 px-4 py-3 text-center text-white shadow-2xl backdrop-blur-md"><p className="text-[9px] font-black uppercase tracking-[.18em] text-cyan-200">OptiGuide</p><p aria-live="polite" className="mt-1 text-sm font-black">{opticalGuide.title}</p><p className="mt-1 text-[10px] leading-4 text-white/75">{opticalGuide.detail}</p><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-cyan-300 transition-all duration-300" style={{width:opticalGuide.quality+'%'}}/></div></div></div>}{ackFile per screen&&<div className="pointer-events-none absolute bottom-3 right-3 rounded-2xl border border-cyan-300/40 bg-white/95 p-2 shadow-2xl"><p className="mb-1 text-center text-[9px] font-black text-slate-950">RECEIVING STATUS</p><canvas ref={ackCanvasRef} className="h-[180px] w-[180px] rounded-lg" aria-label="OptiTransfer receiver acknowledgement QR"/></div>}</div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving){setAckFile per screen('');stopReceive();}else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning':'Camera off'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Speed test'}</button>}</div></div>
+      <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><div className="relative overflow-hidden rounded-2xl bg-black"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-contain sm:min-h-[560px]"/>{receiving&&<div className="pointer-events-none absolute inset-0"><div className="absolute inset-0 grid place-items-center"><div className={`relative aspect-square w-[72%] max-w-[560px] rounded-[28px] border-2 transition-colors duration-300 ${opticalGuide.tone==='ready'?'border-emerald-300 shadow-[0_0_32px_rgba(52,211,153,.28)]':opticalGuide.tone==='closer'||opticalGuide.tone==='farther'?'border-amber-300 shadow-[0_0_32px_rgba(251,191,36,.22)]':'border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]'}`}><span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/75 px-3 py-1.5 text-[10px] font-black text-white">{opticalGuide.title}</span></div></div><div className="absolute bottom-4 left-1/2 w-[min(92%,440px)] -translate-x-1/2 rounded-2xl border border-white/15 bg-black/75 px-4 py-3 text-center text-white shadow-2xl backdrop-blur-md"><p className="text-[9px] font-black uppercase tracking-[.18em] text-cyan-200">OptiGuide</p><p aria-live="polite" className="mt-1 text-sm font-black">{opticalGuide.title}</p><p className="mt-1 text-[10px] leading-4 text-white/75">{opticalGuide.detail}</p><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-cyan-300 transition-all duration-300" style={{width:opticalGuide.quality+'%'}}/></div></div></div>}{ackPayload&&<div className="pointer-events-none absolute bottom-3 right-3 rounded-2xl border border-cyan-300/40 bg-white/95 p-2 shadow-2xl"><p className="mb-1 text-center text-[9px] font-black text-slate-950">RECEIVING STATUS</p><canvas ref={ackCanvasRef} className="h-[180px] w-[180px] rounded-lg" aria-label="OptiTransfer receiver acknowledgement QR"/></div>}</div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving){setAckPayload('');stopReceive();}else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning':'Camera off'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Speed test'}</button>}</div></div>
       <div className="transfer-receiver-panel glass-panel rounded-[28px] p-5"><LockKeyhole size={20} className="text-cyan-300"/><p className="mt-3 font-bold">Easy receiving</p><p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">The receiver uses several ways to read the code so it can keep working when the camera misses a frame.</p><div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.05] p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-cyan-200">OptiGuide</p><p className="mt-1 text-base font-black">{opticalGuide.title}</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{opticalGuide.detail}</p></div><div className="shrink-0 text-right"><p className="text-[10px] text-[var(--text-muted)]">Reading quality</p><p className="text-lg font-black">{opticalGuide.quality}%</p></div></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all duration-300" style={{width:opticalGuide.quality+'%'}}/></div><p className="mt-3 text-[10px] leading-4 text-[var(--text-muted)]">Follow the on-screen message. It will tell you when to move closer, move farther away, center the code, or hold still.</p></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><Activity size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Camera</p><p className="mt-1 text-sm font-black">{telemetry.cameraFrames}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">checks</p></div>
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><ScanLine size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Code reads</p><p className="mt-1 text-sm font-black">{telemetry.qrDetections}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.detectedPerSecond.toFixed(1)}/s</p></div>
