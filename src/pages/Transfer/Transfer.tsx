@@ -74,6 +74,8 @@ export function Transfer() {
   // Reliability-first physical MVP: each compatibility QR is displayed long
   // enough for a slow camera to acquire it, and compatibility playback repeats it.
   const [intervalMs,setIntervalMs]=useState(1000);
+  // Protect the final compatibility frame with an explicit acquisition tail.
+  const FINAL_FRAME_EXTRA_DWELLS=6;
   const [error,setError]=useState('');
   const [receiving,setReceiving]=useState(false);
   const [progress,setProgress]=useState<Progress|null>(null);
@@ -229,7 +231,9 @@ export function Transfer() {
                 playbackGroupRef.current+=1;
               }else{
                 playbackRepeatRef.current+=1;
-                if(playbackRepeatRef.current>=2){
+                const isLastCompatibilityGroup=playbackGroupRef.current>=totalGroups-1;
+                const requiredRepeats=isLastCompatibilityGroup ? 2+FINAL_FRAME_EXTRA_DWELLS : 2;
+                if(playbackRepeatRef.current>=requiredRepeats){
                   playbackRepeatRef.current=0;
                   playbackGroupRef.current+=1;
                 }
