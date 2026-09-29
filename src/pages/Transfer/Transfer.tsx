@@ -161,6 +161,8 @@ export function Transfer() {
   const feedbackLoopRef=useRef<number|null>(null);
   const feedbackActiveRef=useRef(false);
   const feedbackLastAckSeqRef=useRef(-1);
+  const feedbackConnectedRef=useRef(false);
+  const feedbackLastAtRef=useRef<number|null>(null);
   const feedbackMissingSetRef=useRef(new Set<number>());
   const feedbackRetryIndexRef=useRef<number|null>(null);
   const feedbackRetryRepeatRef=useRef(0);
@@ -417,12 +419,17 @@ export function Transfer() {
             const fps=renderWindowStatsRef.current.count/(windowMs/1000);
             const avgRender=renderWindowStatsRef.current.renderMs/Math.max(1,renderWindowStatsRef.current.count);
             if(autoTune){
-              // Adaptive optical governor. Rendering is only one constraint:
-              // when receiver ACKs are healthy, shorten dwell; when ACKs stop,
-              // slow down before retransmitting. This avoids running a fast
-              // stream blindly and then replaying the entire file.
-              if(feedbackEnabled && feedbackConnected && !fountainMode && feedbackMissingSetRef.current.size===0){
-                if(avgRender<16 && fps>30 && intervalMs>300)setIntervalMs(v=>Math.max(300,v-50));
+              // Closed-loop optical governor. Compatibility mode accelerates
+              // only with a fresh receiver ACK and no reported gaps; stale ACK
+              // state or missing frames biases playback slower before recovery.
+              if(feedbackEnabled && !fountainMode && feedbackConnectedRef.current){
+                const ackAge=feedbackLastAtRef.current===null?Number.POSITIVE_INFINITY:Date.now()-feedbackLastAtRef.current;
+                const gaps=feedbackMissingSetRef.current.size;
+                if(gaps>0 || ackAge>1400){
+                  if(intervalMs<1300)setIntervalMs(v=>Math.min(1300,v+50));
+                }else if(ackAge<900 && avgRender<16 && fps>30 && intervalMs>300){
+                  setIntervalMs(v=>Math.max(300,v-25));
+                }
               }else if(fountainMode){
                 if(avgRender<9 && fps>45 && intervalMs>120)setIntervalMs(v=>Math.max(120,v-10));
                 else if(avgRender>42 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+25));
@@ -494,6 +501,8 @@ export function Transfer() {
 
   function resetFeedbackState(){
     feedbackLastAckSeqRef.current=-1;
+    feedbackConnectedRef.current=false;
+    feedbackLastAtRef.current=null;
     feedbackMissingSetRef.current.clear();
     feedbackRetryIndexRef.current=null;
     feedbackRetryRepeatRef.current=0;
@@ -511,10 +520,12 @@ export function Transfer() {
     if(!ack || !activePlan || ack.sequence<=feedbackLastAckSeqRef.current || ack.session!==activePlan.session) return false;
 
     feedbackLastAckSeqRef.current=ack.sequence;
+    feedbackConnectedRef.current=true;
+    feedbackLastAtRef.current=Date.now();
     setFeedbackConnected(true);
     setFeedbackReceived(ack.received);
     setFeedbackTotal(ack.total);
-    setFeedbackLastAt(Date.now());
+    setFeedbackLastAt(feedbackLastAtRef.current);
 
     if(ack.mode==='compatibility' && compat && ack.total===compat.total){
       const missingSet=feedbackMissingSetRef.current;
