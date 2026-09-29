@@ -56,6 +56,13 @@ type NativeQrDetector = {
   detect(source:HTMLVideoElement):Promise<Array<{rawValue?:string;format?:string}>>;
 };
 
+type OpticalGuideState = {
+  tone:'searching'|'closer'|'farther'|'center'|'steady'|'ready'|'light';
+  title:string;
+  detail:string;
+  quality:number;
+};
+
 function getDisplayLaneCount() {
   if (typeof window === 'undefined') return 4;
   const width = Math.min(window.innerWidth, window.screen?.width || window.innerWidth);
@@ -151,6 +158,9 @@ export function Transfer() {
   const zxingActiveRef=useRef(false);
   const zxingCallsRef=useRef(0);
   const [probeStatus,setProbeStatus]=useState('Not run');
+  const [opticalGuide,setOpticalGuide]=useState<OpticalGuideState>({tone:'searching',title:'Looking for the sender screen…',detail:'Point your camera at the QR stream.',quality:0});
+  const lastGuideBoxRef=useRef<{x:number;y:number;width:number;height:number}|null>(null);
+  const guideStableCountRef=useRef(0);
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
   const feedbackVideoRef=useRef<HTMLVideoElement>(null);
@@ -977,6 +987,53 @@ export function Transfer() {
     }
   }
 
+  function updateOpticalGuide(boxes:Array<{x:number;y:number;width:number;height:number}>, frameWidth:number, frameHeight:number, detected:boolean){
+    if(!receivingRef.current) return;
+    if(!detected || boxes.length===0){
+      guideStableCountRef.current=0;
+      const misses=noDetectionDecodeCountRef.current;
+      setOpticalGuide({
+        tone:'closer',
+        title:misses>=6?'Move a little closer':'Looking for the sender screen…',
+        detail:misses>=6?'Make the QR stream fill more of the guide box.':'Point the camera at the sender screen and keep it inside the guide.',
+        quality:Math.max(0,Math.min(34,6+misses*3)),
+      });
+      return;
+    }
+    const box=boxes[0];
+    const cx=(box.x+box.width/2)/Math.max(1,frameWidth);
+    const cy=(box.y+box.height/2)/Math.max(1,frameHeight);
+    const size=Math.min(box.width/Math.max(1,frameWidth),box.height/Math.max(1,frameHeight));
+    const centered=Math.abs(cx-.5)<.14 && Math.abs(cy-.5)<.14;
+    const previous=lastGuideBoxRef.current;
+    const movement=previous ? Math.hypot((box.x-previous.x)/Math.max(1,frameWidth),(box.y-previous.y)/Math.max(1,frameHeight)) : 0;
+    lastGuideBoxRef.current=box;
+    if(movement<.025) guideStableCountRef.current+=1;
+    else guideStableCountRef.current=0;
+
+    if(!centered){
+      setOpticalGuide({tone:'center',title:cx<.5?'Move slightly right':'Move slightly left',detail:'Center the QR stream inside the guide.',quality:55});
+      return;
+    }
+    if(size<.20){
+      setOpticalGuide({tone:'closer',title:'Move a little closer',detail:'The QR is too small for the camera to resolve reliably.',quality:42});
+      return;
+    }
+    if(size>.78){
+      setOpticalGuide({tone:'farther',title:'Move a little farther',detail:'Give the camera more room around the QR.',quality:48});
+      return;
+    }
+    if(movement>.07){
+      setOpticalGuide({tone:'steady',title:'Hold steady',detail:'The QR is detected. Keep the phone still for reliable capture.',quality:72});
+      return;
+    }
+    if(guideStableCountRef.current>=3){
+      setOpticalGuide({tone:'ready',title:'Perfect position — hold steady',detail:'Signal is ready for optical transfer.',quality:96});
+      return;
+    }
+    setOpticalGuide({tone:'steady',title:'Hold steady',detail:'QR detected. Keep the screen inside the guide.',quality:86});
+  }
+
   function resetDecoder(){
     fountainDecoderRef.current=null;
     fountainMetaRef.current=null;
@@ -1233,6 +1290,7 @@ export function Transfer() {
           void job.then(async decoded=>{
             const processStarted=performance.now();
             qrDetectionsRef.current+=decoded.values.length;
+            updateOpticalGuide(decoded.boxes ?? [],width,height,decoded.values.length>0);
             if(decoded.values.length>0){
               lastDetectionRef.current=decoded.values[0].slice(0,48);
               noDetectionDecodeCountRef.current=0;
@@ -1290,6 +1348,9 @@ export function Transfer() {
     compatAckFirstMissingRef.current=1;
     compatAckSessionRef.current=null;
     compatAckSequenceRef.current=0;
+    lastGuideBoxRef.current=null;
+    guideStableCountRef.current=0;
+    setOpticalGuide({tone:'searching',title:'Looking for the sender screen…',detail:'Point your camera at the QR stream.',quality:0});
     setAckPayload('');
     receiverStartedRef.current=null;solvedRef.current=0;duplicateCountRef.current=0;
     detectedWindowRef.current={started:0,count:0};scanDelayRef.current=55;
@@ -1426,8 +1487,8 @@ export function Transfer() {
           <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Auto tune<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On · render-safe</option><option value="off">Off · manual</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="300">300 ms · turbo</option><option value="450">450 ms · fast</option><option value="500">500 ms · fast + margin</option><option value="700">700 ms · balanced</option><option value="1000">1000 ms · reliable</option><option value="1300">1300 ms · extra margin</option><option value="1600">1600 ms · maximum reliability</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Engine</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Render</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Payload</b><p className="mt-1 text-[var(--text-muted)]">{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':'{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':(compat?.bytesPerFrame??OR_TRANSFER_BYTES_PER_FRAME)+' raw bytes/frame · 1× dwell per frame'}'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Display lanes</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · MVP compatibility is one optical lane; density changes payload, not lane geometry</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Recovery</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Fountain':'Sequential'}</p></div></div>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
-      <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><div className="relative overflow-hidden rounded-2xl bg-black"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-contain sm:min-h-[560px]"/>{receiving&&<div className="pointer-events-none absolute inset-0 grid place-items-center"><div className="relative aspect-square w-[72%] max-w-[560px] rounded-[28px] border-2 border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]"><span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/65 px-3 py-1 text-[10px] font-bold text-white">ALIGN QR INSIDE FRAME</span></div></div>}{ackPayload&&<div className="pointer-events-none absolute bottom-3 right-3 rounded-2xl border border-cyan-300/40 bg-white/95 p-2 shadow-2xl"><p className="mb-1 text-center text-[9px] font-black text-slate-950">RETURN ACK</p><canvas ref={ackCanvasRef} className="h-[180px] w-[180px] rounded-lg" aria-label="OptiTransfer receiver acknowledgement QR"/></div>}</div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving){setAckPayload('');stopReceive();}else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning multi-QR':'Camera idle'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Benchmark 1 MB'}</button>}</div></div>
-      <div className="transfer-receiver-panel glass-panel rounded-[28px] p-5"><LockKeyhole size={20} className="text-cyan-300"/><p className="mt-3 font-bold">Loss-tolerant receiver</p><p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">MVP receiver runs redundant QR acquisition paths: ZXing video decoding plus a deterministic jsQR worker fallback, with native BarcodeDetector used when available. It reports camera frames, decoder calls, QR hits, and accepted ORX1 frames separately so failures are diagnosable.</p><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><div className="relative overflow-hidden rounded-2xl bg-black"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-contain sm:min-h-[560px]"/>{receiving&&<div className="pointer-events-none absolute inset-0 grid place-items-center"><div className={`relative aspect-square w-[72%] max-w-[560px] rounded-[28px] border-2 transition-colors duration-300 ${opticalGuide.tone==='ready'?'border-emerald-300 shadow-[0_0_32px_rgba(52,211,153,.28)]':opticalGuide.tone==='closer'||opticalGuide.tone==='farther'?'border-amber-300 shadow-[0_0_32px_rgba(251,191,36,.22)]':'border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]'}`}><span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 px-3 py-1.5 text-[10px] font-black text-white">{opticalGuide.title}</span></div></div>}{ackPayload&&<div className="pointer-events-none absolute bottom-3 right-3 rounded-2xl border border-cyan-300/40 bg-white/95 p-2 shadow-2xl"><p className="mb-1 text-center text-[9px] font-black text-slate-950">RETURN ACK</p><canvas ref={ackCanvasRef} className="h-[180px] w-[180px] rounded-lg" aria-label="OptiTransfer receiver acknowledgement QR"/></div>}</div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving){setAckPayload('');stopReceive();}else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning multi-QR':'Camera idle'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Benchmark 1 MB'}</button>}</div></div>
+      <div className="transfer-receiver-panel glass-panel rounded-[28px] p-5"><LockKeyhole size={20} className="text-cyan-300"/><p className="mt-3 font-bold">Loss-tolerant receiver</p><p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">MVP receiver runs redundant QR acquisition paths: ZXing video decoding plus a deterministic jsQR worker fallback, with native BarcodeDetector used when available. It reports camera frames, decoder calls, QR hits, and accepted ORX1 frames separately so failures are diagnosable.</p><div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.05] p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-cyan-200">OptiGuide</p><p className="mt-1 text-base font-black">{opticalGuide.title}</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{opticalGuide.detail}</p></div><div className="shrink-0 text-right"><p className="text-[10px] text-[var(--text-muted)]">Optical quality</p><p className="text-lg font-black">{opticalGuide.quality}%</p></div></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all duration-300" style={{width:opticalGuide.quality+'%'}}/></div><p className="mt-3 text-[10px] leading-4 text-[var(--text-muted)]">No measurements needed. OptiGuide uses QR geometry and decoder feedback to tell the user when to move closer, move farther, center, or hold steady.</p></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><Activity size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Camera</p><p className="mt-1 text-sm font-black">{telemetry.cameraFrames}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">capture samples</p></div>
           <div className="rounded-2xl bg-cyan-300/[.06] p-3"><ScanLine size={16} className="text-cyan-300"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">QR hits</p><p className="mt-1 text-sm font-black">{telemetry.qrDetections}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.detectedPerSecond.toFixed(1)}/s</p></div>
           <div className="rounded-2xl bg-white/5 p-3"><TimerReset size={16} className="text-white/70"/><p className="mt-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Decoder</p><p className="mt-1 text-sm font-black">{telemetry.decodeMs.toFixed(0)} ms</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{telemetry.decoderCalls} jsQR calls · {telemetry.zxingAssist?'ZXing QR assist':'jsQR worker fallback'}</p></div>
