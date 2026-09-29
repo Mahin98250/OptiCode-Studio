@@ -825,7 +825,10 @@ async function opticalAckRoundTrip() {
   const partial = parseAckPayload(partialPayload);
   assert(partial, 'Frontier ACK diagnostic did not parse.');
   assert(getAckMissingIndexes(partial).length === 0, 'ACK frontier incorrectly reported unseen future frames as missing.');
-  return '59/60 bitmap surfaced frame #60 · completion ACK cleared the missing set';
+
+  const legacy = parseAckPayload('OTACK1:legacy|compatibility|3|3|1|8|Dw==|2|complete');
+  assert(legacy?.state === 'complete' && legacy.frontier === 3, 'Legacy completion ACK was not accepted safely.');
+  return '59/60 bitmap surfaced frame #60 · future frames excluded · legacy completion ACK accepted';
 }
 
 export type ProtocolDiagnosticProgress = {
