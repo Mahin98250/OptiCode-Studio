@@ -476,7 +476,7 @@ export function QRScanner() {
           URL.revokeObjectURL(source);
 
           if (code?.data) handleDecoded(code.data, 'qr_code');
-          else setError('I couldn't read a code from that photo. Try a clearer, brighter photo.');
+          else setError("I couldn't read a code from that photo. Try a clearer, brighter photo.");
         } catch {
           URL.revokeObjectURL(source);
           setError('Unable to read this image.');
