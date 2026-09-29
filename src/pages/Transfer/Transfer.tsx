@@ -900,6 +900,11 @@ export function Transfer() {
     recentRef.current.clear();
   }
 
+  useEffect(()=>{
+    if(playing && feedbackEnabled && (compat ?? fountain)) void startFeedbackCamera();
+    if(!feedbackEnabled) stopFeedbackCamera();
+  },[playing,feedbackEnabled,compat,fountain]);
+
   async function choose(value?:File){
     if(!value)return;
     setError(''); setResult(null); stopPlayback(); playbackGroupRef.current=0; setGroup(0); resetDecoder(); clearRenderPipeline(); receiverStartedRef.current=null; solvedRef.current=0; decodedBytesRef.current=0; duplicateCountRef.current=0; detectedWindowRef.current={started:0,count:0}; renderWindowRef.current={started:0,count:0};
@@ -973,7 +978,7 @@ export function Transfer() {
           if(benchmarking) await finishBenchmarkRun();
           setResult({url:rebuilt.url,name:rebuilt.name,size:rebuilt.size,mime:rebuilt.mime});
           setProgress(null);
-          stopReceive();
+          stopReceive(true);
         }
       }
       return;
@@ -999,12 +1004,13 @@ export function Transfer() {
       solvedRef.current=d.solved;
       decodedBytesRef.current=Math.min(frame.size,d.solved*frame.blockBytes);
       setProgress({mode:'fountain',session:frame.session,name:frame.name,received:d.solved,total:frame.blocks,duplicates:duplicateCountRef.current});
+      publishFountainAck(frame,d.solved,d.complete);
       if(d.complete){
         const rebuilt=await fountainDecoderRef.current.reconstruct();
         if(rebuilt){
           if(benchmarking) await finishBenchmarkRun();
           const url=URL.createObjectURL(new Blob([rebuilt.bytes.buffer as ArrayBuffer],{type:frame.mime}));
-          setResult({url,name:frame.name,size:frame.size,mime:frame.mime}); setProgress(null); stopReceive();
+          setResult({url,name:frame.name,size:frame.size,mime:frame.mime}); setProgress(null); stopReceive(true);
         }
       }
       return;
@@ -1026,6 +1032,7 @@ export function Transfer() {
       if(added.duplicate)duplicateCountRef.current+=1;
       decodedBytesRef.current=Math.min(frame.size,Math.round((added.received/added.total)*frame.size));
       setProgress(prev=>({mode:'compatibility',session:frame.session,name:frame.name,received:added.received,total:added.total,duplicates:duplicateCountRef.current}));
+      publishCompatibilityAck(frame,added.received,added.complete);
       if(added.complete){
         const rebuilt=await reconstructTransfer(frame.session);
         if(compatibilitySessionRef.current!==sessionAtStart)return;
@@ -1194,6 +1201,11 @@ export function Transfer() {
 
   async function startReceive(){
     setError('');setResult(null);setProgress(null);resetDecoder();
+    compatAckBitmapRef.current=null;
+    compatAckFirstMissingRef.current=1;
+    compatAckSessionRef.current=null;
+    compatAckSequenceRef.current=0;
+    setAckPayload('');
     receiverStartedRef.current=null;solvedRef.current=0;duplicateCountRef.current=0;
     detectedWindowRef.current={started:0,count:0};scanDelayRef.current=55;
     cameraFramesRef.current=0;decoderCallsRef.current=0;qrDetectionsRef.current=0;acceptedTransferFramesRef.current=0;lastDetectionRef.current='—';telemetryTickRef.current=0;
