@@ -21,7 +21,7 @@ export type FountainPlan = {
   blocks: number;
   blockBytes: number;
   recommended: number;
-  getDroplet: (lane?: number, sequence?: number, laneCount?: 1 | 2 | 4) => Promise<string>;
+  getDroplet: (lane?: number, sequence?: number, laneCount?: 1 | 2 | 4) => string;
 };
 
 export type FountainDroplet = {
@@ -230,7 +230,7 @@ export async function createFountainTransfer(file: File): Promise<FountainPlan> 
     blockBytes: FOUNTAIN_BLOCK_BYTES,
     recommended,
 
-    getDroplet: async (lane = 0, sequence = 0, laneCount = FOUNTAIN_GRID_SIZE) => {
+    getDroplet: (lane = 0, sequence = 0, laneCount = FOUNTAIN_GRID_SIZE) => {
       const normalizedLane = ((lane % FOUNTAIN_GRID_SIZE) + FOUNTAIN_GRID_SIZE) % FOUNTAIN_GRID_SIZE;
       const normalizedSequence = Math.max(0, Math.floor(sequence));
       const activeLaneCount: 1 | 2 | 4 = laneCount === 1 || laneCount === 2 || laneCount === 4
