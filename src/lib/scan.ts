@@ -42,7 +42,7 @@ export function analyzeScan(value: string, format = ''): ScanAnalysis {
 
   if (raw.startsWith('ORIMG1:data:image/')) return { kind: 'image', title: 'Image QR', subtitle: 'A photo is embedded in this QR code.', value: raw, meta: { Type: 'Compressed image', Storage: 'Inside QR code' } };
 
-  if (upper.startsWith('ORX1:')) {
+  if (upper.startsWith('ORX1:') || upper.startsWith('ORX2:')) {
     const parts = raw.split('|');
     const session = parts[0].slice(5);
     const size = Number(parts[3]);
