@@ -47,7 +47,7 @@ export function Diagnostics() {
       <div className="mt-5 rounded-[32px] border border-cyan-300/15 bg-[var(--bg-elevated)] p-6 shadow-glass backdrop-blur-2xl sm:p-9">
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/15 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold uppercase tracking-[.16em] text-cyan-600 dark:text-cyan-200">
-            <FlaskConical size={14} /> Protocol diagnostics
+            <FlaskConical size={14} /> System check
           </span>
 
           {results.length > 0 && (
@@ -63,9 +63,9 @@ export function Diagnostics() {
           )}
         </div>
 
-        <h1 className="mt-5 text-4xl font-black tracking-[-.045em] sm:text-6xl">Test the optical engine.</h1>
+        <h1 className="mt-5 text-4xl font-black tracking-[-.045em] sm:text-6xl">Check that file sharing is working.</h1>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--text-muted)] sm:text-base">
-          Runs the protocol suite in a stable, one-test-at-a-time sequence so worker-heavy cases do not compete for CPU or browser storage. Physical throughput still requires a real screen-to-camera run.
+          This checks the app's file-sharing features on this device. It does not upload your files.
         </p>
 
         {running && progress && (
@@ -73,7 +73,7 @@ export function Diagnostics() {
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">
-                  Running diagnostics
+                  Checking
                 </p>
                 <p className="mt-1 truncate text-sm font-bold text-[var(--text)]">{progress.current}</p>
               </div>
@@ -95,7 +95,7 @@ export function Diagnostics() {
             <div className="flex items-center gap-3">
               <CheckCircle2 size={19} className="shrink-0 text-emerald-600 dark:text-emerald-300" />
               <div>
-                <p className="text-sm font-black text-[var(--text)]">Diagnostics complete</p>
+                <p className="text-sm font-black text-[var(--text)]">Check complete</p>
                 <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                   {passed}/{total} passed · {failed} failed
                 </p>
@@ -107,21 +107,21 @@ export function Diagnostics() {
         <div className="mt-6 flex flex-wrap gap-3">
           <GlassButton onClick={() => void run()} disabled={running}>
             {running ? <RotateCcw size={15} className="animate-spin" /> : <Play size={15} />}
-            {running ? 'Running diagnostics…' : 'Run full diagnostics'}
+            {running ? 'Checking…' : 'Run full check'}
           </GlassButton>
 
           <Link
             to="/transfer"
             className="inline-flex min-h-10 items-center rounded-full border border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--text)]"
           >
-            Open physical transfer test
+            Open file sharing
           </Link>
         </div>
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
         <div className="glass-soft rounded-[24px] p-4">
-          <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Tests</p>
+          <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Checks</p>
           <p className="mt-1 text-2xl font-black text-[var(--text)]">{results.length}</p>
         </div>
         <div className="glass-soft rounded-[24px] p-4">
@@ -161,7 +161,7 @@ export function Diagnostics() {
               <FlaskConical size={28} className="mx-auto text-cyan-600 dark:text-cyan-300" />
               <p className="mt-3 text-sm font-bold text-[var(--text)]">No run yet</p>
               <p className="mt-1 text-xs text-[var(--text-muted)]">
-                Start the full diagnostics suite to exercise the transfer engine.
+                Run the check above to test the file-sharing system.
               </p>
             </div>
           </GlassCard>
