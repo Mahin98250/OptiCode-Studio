@@ -4,9 +4,9 @@ import { motion } from 'framer-motion';
 import { GlassCard } from '../../components/ui/GlassCard';
 
 const features = [
-  { icon: Zap, title: 'Fast QR creation', text: 'Create QR codes live from text, links and photos, with export controls.' },
-  { icon: ScanLine, title: 'QR + barcode scanning', text: 'Camera, gallery, multi-format decoding, flashlight and zoom in one scanner.' },
-  { icon: ShieldCheck, title: 'Private local workspace', text: 'History, analytics, backups and transfer tools stay on your device.' },
+  { icon: Zap, title: 'Create QR codes', text: 'Turn text, links, or photos into a QR code.' },
+  { icon: ScanLine, title: 'Scan QR codes and barcodes', text: 'Use your camera or a photo to scan QR codes and barcodes.' },
+  { icon: ShieldCheck, title: 'Private and on your device', text: 'Your saved scans and settings stay on this device.' },
 ];
 
 export function Home() {
@@ -23,10 +23,10 @@ export function Home() {
             </div>
             <div className="space-y-5">
               <h1 className="max-w-3xl text-5xl font-black leading-[.98] tracking-[-.045em] text-[var(--text)] sm:text-7xl">
-                Every code. <span className="text-gradient">One studio.</span>
+                Everything you need. <span className="text-gradient">In one place.</span>
               </h1>
               <p className="max-w-xl text-base leading-7 text-[var(--text-muted)] sm:text-lg">
-                Create QR codes, scan QR codes and barcodes, inspect product codes, move files optically, and manage everything from one polished workspace.
+                Create QR codes, scan codes, share files without internet, and keep your saved scans in one simple app.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -43,7 +43,7 @@ export function Home() {
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-[var(--text-muted)]">
               <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-emerald-300" /> No account required</span>
               <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-emerald-300" /> Local history</span>
-              <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-emerald-300" /> Export PNG / SVG / JPEG</span>
+              <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-emerald-300" /> Save as PNG / SVG / JPEG</span>
             </div>
           </motion.div>
 
@@ -53,8 +53,8 @@ export function Home() {
               <div className="relative rounded-[25px] border border-white/10 bg-white/[.035] p-4">
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--text-muted)]">Live preview</p>
-                    <p className="mt-1 text-sm font-semibold text-[var(--text)]">Your next code</p>
+                    <p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--text-muted)]">Preview</p>
+                    <p className="mt-1 text-sm font-semibold text-[var(--text)]">Your QR code</p>
                   </div>
                   <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/8 text-cyan-300"><QrCode size={18} /></span>
                 </div>
@@ -84,8 +84,8 @@ export function Home() {
       </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <GlassCard><div className="flex items-center gap-4"><Download className="text-violet-300" /><div><p className="font-semibold text-[var(--text)]">Export-ready</p><p className="text-sm text-[var(--text-muted)]">PNG, SVG and JPEG actions built into the workflow.</p></div></div></GlassCard>
-        <GlassCard><div className="flex items-center gap-4"><ShieldCheck className="text-emerald-300" /><div><p className="font-semibold text-[var(--text)]">Your data stays local</p><p className="text-sm text-[var(--text-muted)]">History and preferences are stored on this device.</p></div></div></GlassCard>
+        <GlassCard><div className="flex items-center gap-4"><Download className="text-violet-300" /><div><p className="font-semibold text-[var(--text)]">Easy to save</p><p className="text-sm text-[var(--text-muted)]">Save your QR code as an image in the format you need.</p></div></div></GlassCard>
+        <GlassCard><div className="flex items-center gap-4"><ShieldCheck className="text-emerald-300" /><div><p className="font-semibold text-[var(--text)]">Your data stays on this device</p><p className="text-sm text-[var(--text-muted)]">Your saved scans and preferences stay on this device.</p></div></div></GlassCard>
       </div>
     </section>
   );
