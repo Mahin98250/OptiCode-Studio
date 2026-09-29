@@ -9,10 +9,10 @@ const links = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/generator', label: 'Create', icon: QrCode },
   { to: '/scanner', label: 'Scan', icon: ScanLine },
-  { to: '/tools', label: 'Tools', icon: Wrench },
-  { to: '/transfer', label: 'Transfer', icon: Zap },
-  { to: '/history', label: 'Library', icon: BarChart3 },
-  { to: '/statistics', label: 'Stats', icon: BarChart3 },
+  { to: '/tools', label: 'More', icon: Wrench },
+  { to: '/transfer', label: 'Send files', icon: Zap },
+  { to: '/history', label: 'Saved', icon: BarChart3 },
+  { to: '/statistics', label: 'Activity', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings2 },
 ];
 
@@ -20,8 +20,8 @@ const mobileLinks = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/generator', label: 'Create', icon: QrCode },
   { to: '/scanner', label: 'Scan', icon: ScanLine },
-  { to: '/tools', label: 'Tools', icon: Wrench },
-  { to: '/transfer', label: 'Transfer', icon: Zap },
+  { to: '/tools', label: 'More', icon: Wrench },
+  { to: '/transfer', label: 'Send files', icon: Zap },
 ];
 
 export function Navbar() {
@@ -40,7 +40,7 @@ export function Navbar() {
               </span>
               <span>
                 <span className="block text-sm font-bold tracking-tight text-[var(--text)]">OptiCode Studio</span>
-                <span className="block text-[10px] font-medium uppercase tracking-[.2em] text-[var(--text-muted)]">QR · Barcode · Optical</span>
+                <span className="block text-[10px] font-medium uppercase tracking-[.2em] text-[var(--text-muted)]">QR · Barcode · File sharing</span>
               </span>
             </Link>
 
