@@ -267,13 +267,30 @@ export function Transfer() {
             const totalGroups=fountainMode
               ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/grid))
               : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/grid));
-            const nextGroup=fountainMode ? playbackGroupRef.current : playbackGroupRef.current % totalGroups;
+            const missingSet=feedbackMissingSetRef.current;
+            if(!fountainMode && feedbackEnabled && feedbackConnected && feedbackRetryIndexRef.current===null && missingSet.size>0){
+              const nextMissing=[...missingSet].filter(index=>index>=1 && index<=totalGroups).sort((a,b)=>a-b)[0];
+              if(nextMissing!==undefined){
+                feedbackRetryIndexRef.current=nextMissing;
+                feedbackRetryRepeatRef.current=0;
+              }
+            }
+            const retryIndex=!fountainMode && feedbackEnabled && feedbackConnected ? feedbackRetryIndexRef.current : null;
+            const nextGroup=retryIndex!==null ? retryIndex-1 : (fountainMode ? playbackGroupRef.current : playbackGroupRef.current % totalGroups);
             const cacheKey=planKey+':'+nextGroup;
             const cached=renderCacheRef.current.get(cacheKey);
             if(cached) {
               drawQrMatricesToCanvas(qrCanvasRef.current,cached.matrices,getOpticalCanvasSize(qrCanvasRef.current),18);
               if(fountainMode){
                 playbackGroupRef.current+=1;
+              }else if(retryIndex!==null){
+                feedbackRetryRepeatRef.current+=1;
+                if(feedbackRetryRepeatRef.current>=2){
+                  missingSet.delete(retryIndex);
+                  feedbackRetryIndexRef.current=null;
+                  feedbackRetryRepeatRef.current=0;
+                  setFeedbackMissing([...missingSet].sort((a,b)=>a-b).slice(0,24));
+                }
               }else{
                 playbackRepeatRef.current+=1;
                 const isLastCompatibilityGroup=playbackGroupRef.current>=totalGroups-1;
@@ -439,6 +456,10 @@ export function Transfer() {
     if(!plan) return;
 
     setError('');
+    if(feedbackEnabled){
+      setFeedbackState('searching');
+      void startFeedbackCamera();
+    }
     playbackGroupRef.current=0;
     const fountainMode=Boolean(fountain);
     const planKey=fountainMode
@@ -664,6 +685,7 @@ export function Transfer() {
 
   function stopPlayback(){
     setPlaying(false);
+    stopFeedbackCamera();
     playbackGroupRef.current=0;
     playbackRepeatRef.current=0;
     void setScreenWakeLock(false);
