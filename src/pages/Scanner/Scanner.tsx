@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom';
 import { QRScanner } from '../../components/scanner/QRScanner';
 
 const highlights = [
-  { icon: Zap, title: 'Instant multi-format detection', text: 'Scan QR codes and common 1D/2D barcodes from the live camera.' },
-  { icon: ImageUp, title: 'Photos & screenshots', text: 'Scan product labels, tickets, screenshots and saved images.' },
-  { icon: ShieldCheck, title: 'Private by design', text: 'Decoding happens locally in your browser instead of uploading scans.' },
+  { icon: Zap, title: 'Quick scanning', text: 'Scan QR codes and common barcodes with your camera.' },
+  { icon: ImageUp, title: 'Scan a photo', text: 'Choose a saved photo, screenshot, ticket, or product label.' },
+  { icon: ShieldCheck, title: 'Private', text: 'Your scans are read on your device instead of being uploaded.' },
 ];
 
 export function Scanner() {
@@ -18,17 +18,17 @@ export function Scanner() {
           <Link to="/" className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)]">Back to home</Link>
           <div className="mt-5 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-soft)] px-3 py-1.5 text-xs font-bold uppercase tracking-[.18em] text-[var(--text-muted)]">
-              <ScanLine size={14} className="text-cyan-300" /> Smart Scanner
+              <ScanLine size={14} className="text-cyan-300" /> Easy scanner
             </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-300">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> QR + Barcode
             </span>
           </div>
           <h1 className="mt-5 max-w-3xl text-4xl font-black tracking-[-.045em] text-[var(--text)] sm:text-6xl">
-            One scanner for <span className="text-gradient">everything.</span>
+            Scan it <span className="text-gradient">easily.</span>
           </h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--text-muted)] sm:text-base">
-            Scan QR codes and common product or industrial barcodes with your camera, a screenshot, or an uploaded photo. No second scanner app needed.
+            Point your camera at a QR code or barcode, or choose a photo. The app will read it for you.
           </p>
           <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold text-[var(--text-muted)]">
             <span className="glass-soft inline-flex items-center gap-1.5 rounded-full px-3 py-2"><ScanLine size={13} /> QR codes</span>
