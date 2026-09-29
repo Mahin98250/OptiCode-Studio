@@ -73,7 +73,7 @@ const tools = [
   { to: '/scanner', icon: ScanLine, eyebrow: 'Scan', title: 'QR + Barcode Scanner', text: 'Use the camera or images for QR, EAN, UPC, Code 128/39, Data Matrix, PDF417 and more.', badge: 'Core' },
   { to: '/transfer', icon: Zap, eyebrow: 'Transfer', title: 'Optical File Transfer', text: 'Send files screen-to-camera with four QR lanes, fountain recovery and an on-device benchmark.', badge: 'OR Transfer 2.0' },
   { to: '/optiframe', icon: Binary, eyebrow: 'Experimental', title: 'OptiFrame Lab', text: 'Test a custom 2-bit optical symbol surface beyond QR with metadata and CRC-32.', badge: 'Phase 2' },
-  { to: '/tools', icon: ScanBarcode, eyebrow: 'Inspect', title: 'Barcode Lab', text: 'Normalize UPC/EAN/ISBN values and verify check digits locally without a product database.', badge: 'Local' },
+  { to: '/tools', icon: ScanBarcode, eyebrow: 'Inspect', title: 'Check a product code', text: 'Normalize UPC/EAN/ISBN values and verify check digits locally without a product database.', badge: 'Local' },
   { to: '/history', icon: HistoryIcon, eyebrow: 'Organize', title: 'Scan Library', text: 'Search, tag, favorite, copy, open and back up your local scan history.', badge: 'Private' },
   { to: '/statistics', icon: BarChart3, eyebrow: 'Analyze', title: 'Scan Analytics', text: 'See scan totals, barcode/QR mix, favorites, activity and tag collections.', badge: 'Private' },
   { to: '/settings', icon: Database, eyebrow: 'Manage', title: 'Backup & Restore', text: 'Export your local library as JSON and restore it on another device.', badge: 'Portable' },
@@ -116,33 +116,33 @@ export function Tools() {
         <div className="relative">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[.18em] text-cyan-300">
-              <Sparkles size={12} /> All-in-one workspace
+              <Sparkles size={12} /> Everything in one place
             </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-soft)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.15em] text-[var(--text-muted)]">
-              <ShieldCheck size={12} /> Local-first
+              <ShieldCheck size={12} /> Stays on this device
             </span>
           </div>
           <h1 className="mt-5 max-w-4xl text-4xl font-black tracking-[-.045em] text-[var(--text)] sm:text-6xl">
-            Every code tool, <span className="text-gradient">in one place.</span>
+            All your tools, <span className="text-gradient">in one place.</span>
           </h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--text-muted)] sm:text-base">
-            OptiCode Studio combines QR creation, QR and barcode scanning, barcode inspection, local history, analytics, backup and high-speed optical file transfer in one installable workspace.
+            Create, scan, share files, and manage your saved scans from one simple app.
           </p>
           <div className="mt-6 grid gap-3 sm:grid-cols-3">
             <Link to="/generator" className="group rounded-[22px] border border-cyan-300/20 bg-cyan-300/10 p-4 transition hover:-translate-y-0.5 hover:bg-cyan-300/15">
               <QrCode className="text-cyan-300" size={20} />
               <p className="mt-3 font-bold text-[var(--text)]">Create</p>
-              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">QR, photo QR and Multi-QR</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">QR codes and photos</p>
             </Link>
             <Link to="/scanner" className="group rounded-[22px] border border-emerald-300/20 bg-emerald-400/10 p-4 transition hover:-translate-y-0.5 hover:bg-emerald-400/15">
               <ScanLine className="text-emerald-300" size={20} />
               <p className="mt-3 font-bold text-[var(--text)]">Scan</p>
-              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">QR + common 1D/2D barcodes</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">QR codes and barcodes</p>
             </Link>
             <Link to="/transfer" className="group rounded-[22px] border border-violet-300/20 bg-violet-400/10 p-4 transition hover:-translate-y-0.5 hover:bg-violet-400/15">
               <Zap className="text-violet-300" size={20} />
               <p className="mt-3 font-bold text-[var(--text)]">Transfer</p>
-              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">Offline optical file transfer</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">Share files without internet</p>
             </Link>
           </div>
         </div>
@@ -152,9 +152,9 @@ export function Tools() {
         <div className="mb-3 flex items-end justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[.18em] text-cyan-300">Toolbox</p>
-            <h2 className="mt-1 text-2xl font-black tracking-tight text-[var(--text)]">All tools & workflows</h2>
+            <h2 className="mt-1 text-2xl font-black tracking-tight text-[var(--text)]">All tools</h2>
           </div>
-          <p className="hidden text-xs text-[var(--text-muted)] sm:block">{tools.length} capabilities</p>
+          <p className="hidden text-xs text-[var(--text-muted)] sm:block">{tools.length} tools</p>
         </div>
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {tools.map(({ to, icon: Icon, eyebrow, title, text: description, badge }) => (
@@ -162,7 +162,7 @@ export function Tools() {
               key={title}
               to={to}
               onClick={(event) => {
-                if (title === 'Barcode Lab') {
+                if (title === 'Check a product code') {
                   event.preventDefault();
                   document.getElementById('barcode-lab')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
@@ -194,9 +194,9 @@ export function Tools() {
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-cyan-300/10 text-cyan-300"><ScanBarcode size={18} /></span>
             <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[.16em] text-cyan-300">Local inspector</p>
-              <h2 className="mt-1 text-xl font-black text-[var(--text)]">Barcode Lab</h2>
-              <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">Paste a product code or ISBN. OptiCode Studio validates known check digits but does not pretend to identify products without a database lookup.</p>
+              <p className="text-[10px] font-bold uppercase tracking-[.16em] text-cyan-300">Code checker</p>
+              <h2 className="mt-1 text-xl font-black text-[var(--text)]">Check a product code</h2>
+              <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">Paste a product code or ISBN to check whether its number looks correct. This does not look up product details.</p>
             </div>
           </div>
 
@@ -207,8 +207,8 @@ export function Tools() {
             className="mt-5 min-h-28 w-full resize-none rounded-[22px] border border-[var(--border)] bg-[var(--bg-soft)] p-4 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-cyan-300/35"
           />
           <div className="mt-3 flex flex-wrap gap-2">
-            <GlassButton onClick={() => void copy()} disabled={!result.clean}><Copy size={14} /> Copy cleaned</GlassButton>
-            <GlassButton onClick={() => openSearch('google')} disabled={!result.clean}><Search size={14} /> Search web</GlassButton>
+            <GlassButton onClick={() => void copy()} disabled={!result.clean}><Copy size={14} /> Copy</GlassButton>
+            <GlassButton onClick={() => openSearch('google')} disabled={!result.clean}><Search size={14} /> Search online</GlassButton>
             <GlassButton onClick={() => openSearch('shopping')} disabled={!result.clean}><Search size={14} /> Shopping</GlassButton>
             <Link to="/scanner" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-white/10">
               <ScanLine size={14} /> Scan in camera
@@ -217,7 +217,7 @@ export function Tools() {
 
           <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
             <div className="rounded-[22px] border border-[var(--border)] bg-[var(--bg-soft)] p-4">
-              <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Analysis</p>
+              <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Result</p>
               <div className="mt-3 flex items-center gap-3">
                 {result.valid === true ? <CheckCircle2 className="text-emerald-300" /> : result.valid === false ? <XCircle className="text-rose-300" /> : <ScanBarcode className="text-cyan-300" />}
                 <div>
@@ -226,16 +226,16 @@ export function Tools() {
                 </div>
               </div>
               <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-                <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Normalized</p>
+                <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Cleaned code</p>
                 <p className="mt-1 break-all font-mono text-sm text-[var(--text)]">{result.clean || '—'}</p>
               </div>
             </div>
             <div className="rounded-[22px] border border-[var(--border)] bg-[var(--bg-soft)] p-4">
               <div className="flex items-center gap-2">
                 <Clipboard size={16} className="text-cyan-300" />
-                <p className="font-bold text-[var(--text)]">Supported checks</p>
+                <p className="font-bold text-[var(--text)]">What can be checked</p>
               </div>
-              <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">UPC-A, EAN-8, EAN-13 / ISBN-13 and ISBN-10 check digits are calculated locally. Other alphanumeric codes are shown without an invented validity score.</p>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">Common product numbers and ISBNs can be checked here. Other codes are shown without guessing whether they are valid.</p>
               <Link to="/scanner" className="mt-4 inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-xs font-bold text-[var(--text)] hover:bg-white/10">
                 <ScanLine size={14} /> Open scanner
               </Link>
@@ -250,20 +250,20 @@ export function Tools() {
             <div className="flex items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-violet-300/10 text-violet-300"><FlaskConical size={18} /></span>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-violet-300">Engineering tools</p>
-                <h2 className="mt-1 text-xl font-black text-[var(--text)]">Protocol diagnostics</h2>
-                <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">Exercise the local transfer stack with round trips, missing-frame recovery, duplicate/out-of-order delivery, fountain recovery stress and SHA-256 integrity checks.</p>
+                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-violet-300">Advanced tools</p>
+                <h2 className="mt-1 text-xl font-black text-[var(--text)]">System check</h2>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">This checks that the file-sharing system is working correctly. Most users do not need to use this.</p>
               </div>
             </div>
             <GlassButton onClick={() => void runDiagnostics()} disabled={diagnosticRunning}>
-              <FlaskConical size={14} /> {diagnosticRunning ? 'Running…' : 'Run diagnostics'}
+              <FlaskConical size={14} /> {diagnosticRunning ? 'Running…' : 'Run system check'}
             </GlassButton>
           </div>
 
           {diagnostics.length > 0 && (
             <div className="mt-5 space-y-2">
               <div className="flex items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] px-4 py-3">
-                <p className="text-xs font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Latest run</p>
+                <p className="text-xs font-bold uppercase tracking-[.14em] text-[var(--text-muted)]">Latest check</p>
                 <p className={diagnostics.every((item) => item.passed) ? 'text-xs font-bold text-emerald-300' : 'text-xs font-bold text-rose-300'}>
                   {diagnostics.filter((item) => item.passed).length} / {diagnostics.length} passed
                 </p>
@@ -290,8 +290,8 @@ export function Tools() {
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
         <Link to="/history" className="glass-soft rounded-[24px] p-5 hover:bg-white/10">
           <Heart size={18} className="text-pink-400" />
-          <p className="mt-3 font-bold text-[var(--text)]">Private library</p>
-          <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">Your scans, tags and favorites stay on-device.</p>
+          <p className="mt-3 font-bold text-[var(--text)]">Saved scans</p>
+          <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">Your saved scans, labels, and favorites stay on this device.</p>
         </Link>
         <Link to="/settings" className="glass-soft rounded-[24px] p-5 hover:bg-white/10">
           <Settings2 size={18} className="text-cyan-300" />
@@ -300,7 +300,7 @@ export function Tools() {
         </Link>
         <Link to="/transfer" className="glass-soft rounded-[24px] p-5 hover:bg-white/10">
           <Zap size={18} className="text-violet-300" />
-          <p className="mt-3 font-bold text-[var(--text)]">Optical transport</p>
+          <p className="mt-3 font-bold text-[var(--text)]">File sharing</p>
           <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">High-speed screen-to-camera file movement.</p>
         </Link>
       </div>
