@@ -21,7 +21,7 @@ type CameraStats = {
   captureFps: number;
   decodeFps: number;
   goodputBps: number;
-  lastConfidence: number;
+  lastReading confidence: number;
   cameraWidth: number;
   cameraHeight: number;
   cameraFrameRate: number;
@@ -51,7 +51,7 @@ type AcquisitionTestState = {
   running: boolean;
   samples: number;
   locks: number;
-  totalAnchors: number;
+  totalCorners found: number;
   averageMs: number;
   peakMs: number;
   lastStage: OptiFrameAcquisitionDiagnostics['stage'];
@@ -76,7 +76,7 @@ function emptyAcquisitionTest(): AcquisitionTestState {
     running: false,
     samples: 0,
     locks: 0,
-    totalAnchors: 0,
+    totalCorners found: 0,
     averageMs: 0,
     peakMs: 0,
     lastStage: 'image',
@@ -95,7 +95,7 @@ export function OptiFrameLab() {
   const [cameraError, setCameraError] = useState('');
   const [cameraDecoded, setCameraDecoded] = useState('');
   const [receiver, setReceiver] = useState({ total: 0, received: 0, bytes: 0, missing: [] as number[], complete: false });
-  const [cameraStats, setCameraStats] = useState<CameraStats>({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: null });
+  const [cameraStats, setCameraStats] = useState<CameraStats>({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastReading confidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: null });
   const [acquisition, setAcquisition] = useState<OptiFrameAcquisitionDiagnostics>({ stage: 'image', anchors: [], confidence: 0, moduleScale: 0, angle: 0, geometryRatio: 0, sampleWidth: 0, sampleHeight: 0, elapsedMs: 0 });
   const [cameraCapabilities, setCameraCapabilities] = useState<string[]>([]);
   const [acquisitionTest, setAcquisitionTest] = useState<AcquisitionTestState>(emptyAcquisitionTest);
@@ -120,7 +120,7 @@ export function OptiFrameLab() {
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const presentationCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const seenSequenceRef = useRef(new Set<number>());
-  const trackedAnchorsRef = useRef<OptiFramePerspectiveDiagnostics['anchors'] | null>(null);
+  const trackedCorners foundRef = useRef<OptiFramePerspectiveDiagnostics['anchors'] | null>(null);
   const framesSinceFullScanRef = useRef(0);
   const acquisitionFailureRef = useRef(0);
   const acquisitionTestRef = useRef(false);
@@ -369,7 +369,7 @@ export function OptiFrameLab() {
         running: samples < ACQUISITION_TEST_SAMPLES,
         samples,
         locks,
-        totalAnchors: previous.totalAnchors + probe.anchors.length,
+        totalCorners found: previous.totalCorners found + probe.anchors.length,
         averageMs: ((previous.averageMs * previous.samples) + elapsed) / samples,
         peakMs: Math.max(previous.peakMs, elapsed),
         lastStage: probe.stage,
@@ -381,22 +381,22 @@ export function OptiFrameLab() {
       if (samples >= ACQUISITION_TEST_SAMPLES) {
         acquisitionTestRef.current = false;
         setStatus(
-          '1× acquisition test complete · ' +
+          'Camera test complete · ' +
           Math.round((locks / samples) * 100) +
           '% full-lock rate · ' +
-          Math.round((next.totalAnchors / samples) * 10) / 10 +
+          Math.round((next.totalCorners found / samples) * 10) / 10 +
           ' anchors/sample · ' +
           next.averageMs.toFixed(0) +
           ' ms mean',
         );
       } else {
-        setStatus('1× acquisition test ' + samples + '/' + ACQUISITION_TEST_SAMPLES + ' · ' + probe.stage.toUpperCase());
+        setStatus('Camera test ' + samples + '/' + ACQUISITION_TEST_SAMPLES + ' · ' + probe.stage.toUpperCase());
       }
       return;
     }
 
     const cropTrackedRegion = (source: ImageData) => {
-      const anchors = trackedAnchorsRef.current;
+      const anchors = trackedCorners foundRef.current;
       if (!anchors) return null;
       const minX = Math.min(...anchors.map(anchor => anchor.x));
       const maxX = Math.max(...anchors.map(anchor => anchor.x));
@@ -549,7 +549,7 @@ export function OptiFrameLab() {
         decodeFps: elapsedFromStart ? (prev.hits + successes.length) / elapsedFromStart : 0,
         bytes: assembly.bytes,
         goodputBps: elapsedFromStart ? assembly.bytes / elapsedFromStart : 0,
-        lastConfidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
+        lastReading confidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
       }));
 
       setReceiver({
@@ -594,18 +594,18 @@ export function OptiFrameLab() {
     if (result) {
       framesSinceFullScanRef.current = usedFullScan ? 0 : framesSinceFullScanRef.current + 1;
       acquisitionFailureRef.current = 0;
-      const absoluteAnchors = result.diagnostics.anchors.map(anchor => ({
+      const absoluteCorners found = result.diagnostics.anchors.map(anchor => ({
         ...anchor,
         x: anchor.x + cropOffset.x,
         y: anchor.y + cropOffset.y,
       })) as OptiFramePerspectiveDiagnostics['anchors'];
-      trackedAnchorsRef.current = absoluteAnchors;
+      trackedCorners foundRef.current = absoluteCorners found;
       setAcquisition({
         stage: 'ready',
-        anchors: absoluteAnchors,
+        anchors: absoluteCorners found,
         confidence: result.diagnostics.confidence,
-        moduleScale: absoluteAnchors.reduce((sum, anchor) => sum + anchor.scale, 0) / absoluteAnchors.length,
-        angle: absoluteAnchors.reduce((sum, anchor) => sum + anchor.angle, 0) / absoluteAnchors.length,
+        moduleScale: absoluteCorners found.reduce((sum, anchor) => sum + anchor.scale, 0) / absoluteCorners found.length,
+        angle: absoluteCorners found.reduce((sum, anchor) => sum + anchor.angle, 0) / absoluteCorners found.length,
         geometryRatio: 0,
         sampleWidth: image.width,
         sampleHeight: image.height,
@@ -636,7 +636,7 @@ export function OptiFrameLab() {
         dropped: prev.dropped + (dropped ? 1 : 0),
         captureFps: elapsedFromStart ? (prev.attempts + 1) / elapsedFromStart : 0,
         decodeFps: elapsedFromStart ? nextHits / elapsedFromStart : 0,
-        lastConfidence: result ? result.diagnostics.confidence : prev.lastConfidence,
+        lastReading confidence: result ? result.diagnostics.confidence : prev.lastReading confidence,
       };
     });
 
@@ -695,7 +695,7 @@ export function OptiFrameLab() {
     setCameraError('');
     assemblerRef.current.reset();
     seenSequenceRef.current.clear();
-    trackedAnchorsRef.current = null;
+    trackedCorners foundRef.current = null;
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
     setCameraDecoded('');
@@ -704,7 +704,7 @@ export function OptiFrameLab() {
     acquisitionTestRef.current = false;
     acquisitionTestMetricsRef.current = emptyAcquisitionTest();
     setAcquisitionTest(emptyAcquisitionTest());
-    setCameraStats({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: performance.now() });
+    setCameraStats({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastReading confidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: performance.now() });
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -775,7 +775,7 @@ export function OptiFrameLab() {
 
   function startAcquisitionTest() {
     if (!cameraOn) {
-      setStatus('Start the camera before running the 1× acquisition test.');
+      setStatus('Start the camera before running the Camera test.');
       return;
     }
     setLaneCount(1);
@@ -795,19 +795,19 @@ export function OptiFrameLab() {
       sampleHeight: 0,
       elapsedMs: 0,
     });
-    setStatus('1× acquisition test armed · sender paused · hold one frame steady inside the camera view.');
+    setStatus('Camera test armed · sender paused · hold one frame steady inside the camera view.');
   }
 
   function stopAcquisitionTest() {
     acquisitionTestRef.current = false;
     setAcquisitionTest(previous => ({ ...previous, running: false }));
-    setStatus('1× acquisition test stopped.');
+    setStatus('Camera test stopped.');
   }
 
   function resetReceiver() {
     assemblerRef.current.reset();
     seenSequenceRef.current.clear();
-    trackedAnchorsRef.current = null;
+    trackedCorners foundRef.current = null;
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
     setCameraDecoded('');
@@ -815,18 +815,18 @@ export function OptiFrameLab() {
     if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
     receivedFileUrlRef.current = '';
     setReceivedFileUrl('');
-    setCameraStats(prev => ({ ...prev, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0 }));
+    setCameraStats(prev => ({ ...prev, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastReading confidence: 0 }));
   }
 
   return (
     <section className="optiframe-page mx-auto max-w-7xl py-8 sm:py-12">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[.18em] text-cyan-300">OptiCode · Optical file transfer MVP</p>
-          <h1 className="mt-2 text-4xl font-black text-[var(--text)] sm:text-6xl">Send files through light.</h1>
-          <p className="mt-4 max-w-4xl text-sm leading-7 text-[var(--text-muted)]">Choose a photo or any file on one device, display the optical stream, and scan it from another device. The Lab controls remain below for protocol diagnostics and physical testing.</p>
+          <p className="text-[10px] font-black uppercase tracking-[.18em] text-cyan-300">Experimental file sharing</p>
+          <h1 className="mt-2 text-4xl font-black text-[var(--text)] sm:text-6xl">Share files using your screen.</h1>
+          <p className="mt-4 max-w-4xl text-sm leading-7 text-[var(--text-muted)]">Choose a file, show it on this screen, and use another device to receive it. Advanced test controls are below.</p>
         </div>
-        <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-300">{capacity} payload bytes / frame</div>
+        <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-300">{capacity} data per screen</div>
       </div>
 
       <GlassCard>
@@ -835,7 +835,7 @@ export function OptiFrameLab() {
             <div className="flex items-center gap-3">
               <span className="grid h-10 w-10 place-items-center rounded-2xl bg-cyan-400/10 text-cyan-300"><Zap size={18}/></span>
               <div>
-                <p className="text-lg font-black text-[var(--text)]">File transfer</p>
+                <p className="text-lg font-black text-[var(--text)]">Share a file</p>
                 <p className="mt-1 text-xs text-[var(--text-muted)]">Device A sends · Device B scans with its camera · the original file is reconstructed automatically.</p>
               </div>
             </div>
@@ -871,18 +871,18 @@ export function OptiFrameLab() {
           <div className="mt-4 flex flex-wrap gap-2">
             <GlassButton onClick={generate}><Zap size={14}/> Generate OptiFrame</GlassButton>
             <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-bold text-[var(--text)]"><Upload size={14}/> Decode image<input type="file" accept="image/*" className="hidden" onChange={event => { void load(event.target.files?.[0]); event.currentTarget.value = ''; }}/></label>
-            <button onClick={save} disabled={!image} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)] disabled:opacity-40"><Download size={14}/> Save</button>
+            <button onClick={save} disabled={!image} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)] disabled:opacity-40"><Download size={14}/> Save image</button>
           </div>
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-xs font-bold text-[var(--text)]">Status</p><p className="mt-1 text-xs leading-6 text-[var(--text-muted)]">{status}</p></div>
-          {decoded && <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-emerald-300">Verified payload</p><p className="mt-2 break-words text-sm text-[var(--text)]">{decoded}</p><button onClick={() => void copy()} className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]"><Copy size={13}/> Copy</button></div>}
+          {decoded && <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-emerald-300">Received</p><p className="mt-2 break-words text-sm text-[var(--text)]">{decoded}</p><button onClick={() => void copy()} className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]"><Copy size={13}/> Copy</button></div>}
         </GlassCard>
 
         <GlassCard>
           <div className="flex items-center justify-between gap-3">
-            <div><p className="text-sm font-bold text-[var(--text)]">Optical surface</p><p className="mt-1 text-[10px] uppercase tracking-[.14em] text-[var(--text-muted)]">{OPTIFRAME_SIZE}×{OPTIFRAME_SIZE} protocol · 1× renders 768 px · 2×/4× render 384 px lanes</p></div>
+            <div><p className="text-sm font-bold text-[var(--text)]">Sharing screen</p><p className="mt-1 text-[10px] uppercase tracking-[.14em] text-[var(--text-muted)]">{OPTIFRAME_SIZE}×{OPTIFRAME_SIZE} protocol · 1× renders 768 px · 2×/4× render 384 px lanes</p></div>
             <span className="rounded-full border border-[var(--border)] px-3 py-2 text-[10px] font-bold text-[var(--text-muted)]">{streamPayload.length} stream frame{streamPayload.length === 1 ? '' : 's'}</span>
           </div>
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Parallel lanes</p><p className="mt-1 text-xs text-[var(--text-muted)]">Each lane carries an independent OptiFrame.</p></div><div className="flex rounded-full border border-[var(--border)] p-1">{([1, 2, 4] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div></div>
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Multiple codes</p><p className="mt-1 text-xs text-[var(--text-muted)]">The screen can show more than one code at a time.</p></div><div className="flex rounded-full border border-[var(--border)] p-1">{([1, 2, 4] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div></div>
           <div className="mt-5 grid place-items-center rounded-[26px] bg-white p-4">
             {streamSurface ? (
               <canvas
@@ -893,8 +893,8 @@ export function OptiFrameLab() {
             ) : <div className={laneCount === 2 ? 'aspect-[2/1] w-full max-w-[760px]' : 'aspect-square w-full max-w-[760px]'} />}
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <GlassButton onClick={() => setStreamPlaying(value => !value)}>{streamPlaying ? <Pause size={14}/> : <Play size={14}/>} {streamPlaying ? 'Pause stream' : 'Play stream'}</GlassButton>
-            {laneCount === 1 && <button onClick={() => setOpticalDisplayMode(true)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]"><Maximize2 size={14}/> Fullscreen 1×</button>}
+            <GlassButton onClick={() => setStreamPlaying(value => !value)}>{streamPlaying ? <Pause size={14}/> : <Play size={14}/>} {streamPlaying ? 'Pause' : 'Start sharing'}</GlassButton>
+            {laneCount === 1 && <button onClick={() => setOpticalDisplayMode(true)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]"><Maximize2 size={14}/> Full screen</button>}
             <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]">
               Speed
               <select value={streamIntervalMs} onChange={event => setStreamIntervalMs(Number(event.target.value))} className="bg-transparent outline-none">
@@ -912,7 +912,7 @@ export function OptiFrameLab() {
             <button onClick={() => setStreamIndex(index => (index + streamPayload.length - laneCount) % Math.max(1, streamPayload.length))} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Previous</button>
             <button onClick={() => setStreamIndex(index => (index + laneCount) % Math.max(1, streamPayload.length))} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Next</button>
           </div>
-          <p className="mt-3 text-xs text-[var(--text-muted)]">{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${laneCount === 2 ? '2:1' : '1:1'} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Play stream or Fullscreen 1×. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep all four finder anchors visible.'}</p>
+          <p className="mt-3 text-xs text-[var(--text-muted)]">{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${laneCount === 2 ? '2:1' : '1:1'} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
         </GlassCard>
       </div>
 
@@ -938,16 +938,16 @@ export function OptiFrameLab() {
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
         <GlassCard>
           <div className="flex items-center justify-between gap-3">
-            <div><div className="flex items-center gap-2 text-sm font-bold text-[var(--text)]">{cameraOn ? <CheckCircle2 size={16} className="text-emerald-300"/> : <ScanLine size={16} className="text-cyan-300"/>} Live camera receiver</div><p className="mt-1 text-xs text-[var(--text-muted)]">Perspective correction runs locally on the browser using the four finder anchors. Camera frames never leave the device.</p></div>
+            <div><div className="flex items-center gap-2 text-sm font-bold text-[var(--text)]">{cameraOn ? <CheckCircle2 size={16} className="text-emerald-300"/> : <ScanLine size={16} className="text-cyan-300"/>} Receive on camera</div><p className="mt-1 text-xs text-[var(--text-muted)]">The camera reads the shared screen directly on this device. Camera images stay on this device.</p></div>
             <div className={`rounded-full border px-3 py-2 text-[10px] font-black tracking-[.12em] ${cameraStats.hits ? 'border-emerald-300/20 bg-emerald-300/10 text-emerald-300' : cameraOn ? 'border-amber-300/20 bg-amber-300/10 text-amber-200' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>
-              {acquisition.stage === 'ready' ? 'OPTICAL LOCK' : cameraOn ? 'SEARCHING' : 'OFFLINE'}
+              {acquisition.stage === 'ready' ? 'READY' : cameraOn ? 'LOOKING' : 'OFF'}
             </div>
             <button onClick={() => void (cameraOn ? stopCamera() : startCamera())} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-950">{cameraOn ? <CameraOff size={14}/> : <Camera size={14}/>} {cameraOn ? 'Stop camera' : 'Start camera'}</button>
           </div>
           <div className="optiframe-camera mt-4 overflow-hidden rounded-[26px] bg-black">
             <div className="relative min-h-[460px] aspect-video sm:min-h-[560px] lg:min-h-[620px]">
               <video ref={videoRef} muted playsInline className="h-full w-full object-cover" />
-              {!cameraOn && <div className="absolute inset-0 grid place-items-center bg-black/55"><div className="text-center"><ScanLine size={28} className="mx-auto text-white/70"/><p className="mt-3 text-sm font-bold text-white">Point the camera at an OptiFrame</p><p className="mt-1 text-xs text-white/50">Keep all four finder anchors visible.</p></div></div>}
+              {!cameraOn && <div className="absolute inset-0 grid place-items-center bg-black/55"><div className="text-center"><ScanLine size={28} className="mx-auto text-white/70"/><p className="mt-3 text-sm font-bold text-white">Point the camera at the sharing screen</p><p className="mt-1 text-xs text-white/50">Keep the whole code inside the guide.</p></div></div>}
               {cameraOn && acquisition.anchors.length > 0 && (
                 <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={"0 0 " + Math.max(1, acquisition.sampleWidth) + " " + Math.max(1, acquisition.sampleHeight)} preserveAspectRatio="none">
                   {acquisition.anchors.length >= 2 && <polyline points={acquisition.anchors.map(anchor => anchor.x + "," + anchor.y).join(" ")} fill="none" stroke="rgba(34,211,238,.9)" strokeWidth={Math.max(2, acquisition.moduleScale * 0.7)} />}
@@ -960,11 +960,11 @@ export function OptiFrameLab() {
           {cameraError && <div className="mt-3 rounded-2xl border border-rose-300/20 bg-rose-400/10 p-4 text-xs leading-6 text-rose-100">{cameraError}</div>}
           {cameraOn && cameraStats.cameraWidth > 0 && cameraStats.cameraWidth < 960 && <div className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-xs leading-6 text-amber-100">The browser supplied a {cameraStats.cameraWidth}×{cameraStats.cameraHeight} camera stream. The detector prefers a higher-resolution feed because more camera pixels per optical module generally gives it more information; this browser did not provide the preferred target.</div>}
           <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4">
-            <div className="flex items-center justify-between gap-3"><p className="text-xs font-black uppercase tracking-[.14em] text-cyan-200">Acquisition diagnostics</p><span className="rounded-full border border-cyan-300/20 px-2 py-1 text-[10px] font-black text-cyan-200">{acquisition.stage.toUpperCase()}</span></div>
+            <div className="flex items-center justify-between gap-3"><p className="text-xs font-black uppercase tracking-[.14em] text-cyan-200">Camera details</p><span className="rounded-full border border-cyan-300/20 px-2 py-1 text-[10px] font-black text-cyan-200">{acquisition.stage.toUpperCase()}</span></div>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div><p className="text-[10px] text-[var(--text-muted)]">Anchors</p><p className="text-sm font-black text-[var(--text)]">{acquisition.anchors.length}/4</p></div>
-              <div><p className="text-[10px] text-[var(--text-muted)]">Confidence</p><p className="text-sm font-black text-[var(--text)]">{Math.round(acquisition.confidence * 100)}%</p></div>
-              <div><p className="text-[10px] text-[var(--text-muted)]">Module scale</p><p className="text-sm font-black text-[var(--text)]">{acquisition.moduleScale ? acquisition.moduleScale.toFixed(1) : '—'} px</p></div>
+              <div><p className="text-[10px] text-[var(--text-muted)]">Corners found</p><p className="text-sm font-black text-[var(--text)]">{acquisition.anchors.length}/4</p></div>
+              <div><p className="text-[10px] text-[var(--text-muted)]">Reading confidence</p><p className="text-sm font-black text-[var(--text)]">{Math.round(acquisition.confidence * 100)}%</p></div>
+              <div><p className="text-[10px] text-[var(--text-muted)]">Code size</p><p className="text-sm font-black text-[var(--text)]">{acquisition.moduleScale ? acquisition.moduleScale.toFixed(1) : '—'} px</p></div>
               <div><p className="text-[10px] text-[var(--text-muted)]">Angle</p><p className="text-sm font-black text-[var(--text)]">{acquisition.angle.toFixed(1)}°</p></div>
             </div>
             <p className="mt-3 text-[10px] leading-5 text-[var(--text-muted)]">Sample {acquisition.sampleWidth || '—'}×{acquisition.sampleHeight || '—'} · acquisition {acquisition.elapsedMs.toFixed(0)} ms · camera {cameraStats.cameraFrameRate ? cameraStats.cameraFrameRate.toFixed(1) + ' FPS' : 'FPS unavailable'} · capabilities: {cameraCapabilities.length ? cameraCapabilities.join(', ') : 'not exposed'}</p>
@@ -972,8 +972,8 @@ export function OptiFrameLab() {
           <div className="mt-4 rounded-2xl border border-violet-300/20 bg-violet-300/10 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[.14em] text-violet-200"><Activity size={14}/> 1× acquisition test</p>
-                <p className="mt-1 text-[10px] leading-5 text-[var(--text-muted)]">Runs 30 full-frame acquisition samples without payload decoding. This isolates finder detection, geometry and calibration from the transfer engine.</p>
+                <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[.14em] text-violet-200"><Activity size={14}/> Camera test</p>
+                <p className="mt-1 text-[10px] leading-5 text-[var(--text-muted)]">Runs a short camera test to see how well this device can read the sharing screen.</p>
               </div>
               <button
                 onClick={acquisitionTest.running ? stopAcquisitionTest : startAcquisitionTest}
@@ -981,15 +981,15 @@ export function OptiFrameLab() {
                 className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {acquisitionTest.running ? <Timer size={14}/> : <Crosshair size={14}/>}
-                {acquisitionTest.running ? 'Stop test' : 'Run 30-frame test'}
+                {acquisitionTest.running ? 'Stop test' : 'Run camera test'}
               </button>
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div><p className="text-[10px] text-[var(--text-muted)]">Samples</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples}/{ACQUISITION_TEST_SAMPLES}</p></div>
-              <div><p className="text-[10px] text-[var(--text-muted)]">Full locks</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? Math.round(acquisitionTest.locks / acquisitionTest.samples * 100) + '%' : '—'}</p></div>
-              <div><p className="text-[10px] text-[var(--text-muted)]">Avg anchors</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? (acquisitionTest.totalAnchors / acquisitionTest.samples).toFixed(1) : '—'}</p></div>
-              <div><p className="text-[10px] text-[var(--text-muted)]">Mean / peak</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? acquisitionTest.averageMs.toFixed(0) + ' / ' + acquisitionTest.peakMs.toFixed(0) + ' ms' : '—'}</p></div>
+              <div><p className="text-[10px] text-[var(--text-muted)]">Good reads</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? Math.round(acquisitionTest.locks / acquisitionTest.samples * 100) + '%' : '—'}</p></div>
+              <div><p className="text-[10px] text-[var(--text-muted)]">Average corners</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? (acquisitionTest.totalCorners found / acquisitionTest.samples).toFixed(1) : '—'}</p></div>
+              <div><p className="text-[10px] text-[var(--text-muted)]">Average / fastest</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? acquisitionTest.averageMs.toFixed(0) + ' / ' + acquisitionTest.peakMs.toFixed(0) + ' ms' : '—'}</p></div>
             </div>
 
             <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] font-bold text-[var(--text-muted)]">
@@ -1010,7 +1010,7 @@ export function OptiFrameLab() {
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Goodput</p><p className="mt-1 text-lg font-black text-[var(--text)]">{(cameraStats.goodputBps / 1024).toFixed(1)} KB/s</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Workers</p><p className="mt-1 text-lg font-black text-[var(--text)]">{decodePoolRef.current.busyCount}/{decodePoolRef.current.capacity}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Decode FPS</p><p className="mt-1 text-lg font-black text-[var(--text)]">{cameraStats.decodeFps.toFixed(1)}</p></div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Anchor confidence</p><p className="mt-1 text-lg font-black text-[var(--text)]">{Math.round(cameraStats.lastConfidence * 100)}%</p></div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Anchor confidence</p><p className="mt-1 text-lg font-black text-[var(--text)]">{Math.round(cameraStats.lastReading confidence * 100)}%</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Camera</p><p className="mt-1 text-sm font-black text-[var(--text)]">{cameraStats.cameraWidth && cameraStats.cameraHeight ? `${cameraStats.cameraWidth}×${cameraStats.cameraHeight}` : '—'}</p></div>
           </div>
         </GlassCard>
@@ -1018,7 +1018,7 @@ export function OptiFrameLab() {
         <GlassCard>
           <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-bold text-[var(--text)]">Receiver state</p><p className="mt-1 text-xs text-[var(--text-muted)]">{receiver.total ? `${receiver.received}/${receiver.total} frames received` : 'Waiting for a frame.'}</p></div><button onClick={resetReceiver} className="rounded-full p-2 text-[var(--text-muted)] hover:bg-white/10" aria-label="Reset receiver"><RotateCcw size={16}/></button></div>
           {receiver.total > 0 && <><div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all" style={{width:`${Math.min(100, receiver.received / receiver.total * 100)}%`}}/></div><p className="mt-3 text-xs text-[var(--text-muted)]">{receiver.complete ? 'Complete payload reassembled in sequence order.' : `Missing: ${receiver.missing.slice(0, 18).join(', ')}${receiver.missing.length > 18 ? '…' : ''}`}</p></>}
-          {receivedFile && receivedFileUrl ? <div className="mt-5 rounded-[22px] border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.14em] text-emerald-300"><CheckCircle2 size={14}/> File received</p><p className="mt-2 text-sm font-black text-[var(--text)]">{receivedFile.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{receivedFile.type} · {receivedFile.size.toLocaleString()} bytes</p><a href={receivedFileUrl} download={receivedFile.name} className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950"><Download size={13}/> Save received file</a></div> : cameraDecoded && <div className="mt-5 rounded-[22px] border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.14em] text-emerald-300"><CheckCircle2 size={14}/> Reassembled text</p><p className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-[var(--text)]">{cameraDecoded}</p><button onClick={() => void navigator.clipboard?.writeText(cameraDecoded)} className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]"><Copy size={13}/> Copy text</button></div>}
+          {receivedFile && receivedFileUrl ? <div className="mt-5 rounded-[22px] border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.14em] text-emerald-300"><CheckCircle2 size={14}/> File received</p><p className="mt-2 text-sm font-black text-[var(--text)]">{receivedFile.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{receivedFile.type} · {receivedFile.size.toLocaleString()} bytes</p><a href={receivedFileUrl} download={receivedFile.name} className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950"><Download size={13}/> Save image received file</a></div> : cameraDecoded && <div className="mt-5 rounded-[22px] border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.14em] text-emerald-300"><CheckCircle2 size={14}/> Reassembled text</p><p className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-[var(--text)]">{cameraDecoded}</p><button onClick={() => void navigator.clipboard?.writeText(cameraDecoded)} className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]"><Copy size={13}/> Copy text</button></div>}
           <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4"><p className="text-xs font-bold text-[var(--text)]">Lab status</p><p className="mt-1 text-xs leading-6 text-[var(--text-muted)]">The real file-transfer path is now wired to the optical stream: files are wrapped with filename/type metadata, fragmented into OptiFrames, displayed continuously, camera-decoded, reassembled, and offered as the original downloadable file. Keep 1× mode for the first physical test. Advanced recovery and speed work comes after this MVP passes a real device-to-device transfer.</p></div>
         </GlassCard>
       </div>
