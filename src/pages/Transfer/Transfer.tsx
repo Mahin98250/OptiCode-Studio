@@ -989,49 +989,105 @@ export function Transfer() {
 
   function updateOpticalGuide(boxes:Array<{x:number;y:number;width:number;height:number}>, frameWidth:number, frameHeight:number, detected:boolean){
     if(!receivingRef.current) return;
+
     if(!detected || boxes.length===0){
       guideStableCountRef.current=0;
       const misses=noDetectionDecodeCountRef.current;
+      const searching=misses<5;
       setOpticalGuide({
-        tone:'closer',
-        title:misses>=6?'Move a little closer':'Looking for the sender screen…',
-        detail:misses>=6?'Make the QR stream fill more of the guide box.':'Point the camera at the sender screen and keep it inside the guide.',
-        quality:Math.max(0,Math.min(34,6+misses*3)),
+        tone:searching?'searching':'closer',
+        title:searching?'Point at the sender screen':'Move a little closer',
+        detail:searching
+          ?'Keep the sender display inside the camera guide.'
+          :'Make the QR stream large enough for the camera to resolve reliably.',
+        quality:searching?12:Math.max(24,Math.min(42,misses*3)),
       });
       return;
     }
-    const box=boxes[0];
-    const cx=(box.x+box.width/2)/Math.max(1,frameWidth);
-    const cy=(box.y+box.height/2)/Math.max(1,frameHeight);
-    const size=Math.min(box.width/Math.max(1,frameWidth),box.height/Math.max(1,frameHeight));
+
+    const primary=boxes.reduce((best,box)=>box.width*box.height>best.width*best.height?box:best,boxes[0]);
+    const cx=(primary.x+primary.width/2)/Math.max(1,frameWidth);
+    const cy=(primary.y+primary.height/2)/Math.max(1,frameHeight);
+    const size=Math.min(primary.width/Math.max(1,frameWidth),primary.height/Math.max(1,frameHeight));
     const centered=Math.abs(cx-.5)<.14 && Math.abs(cy-.5)<.14;
     const previous=lastGuideBoxRef.current;
-    const movement=previous ? Math.hypot((box.x-previous.x)/Math.max(1,frameWidth),(box.y-previous.y)/Math.max(1,frameHeight)) : 0;
-    lastGuideBoxRef.current=box;
+    const movement=previous
+      ? Math.hypot(
+          (primary.x-previous.x)/Math.max(1,frameWidth),
+          (primary.y-previous.y)/Math.max(1,frameHeight),
+        )
+      : 0;
+    lastGuideBoxRef.current=primary;
     if(movement<.025) guideStableCountRef.current+=1;
     else guideStableCountRef.current=0;
 
     if(!centered){
-      setOpticalGuide({tone:'center',title:cx<.5?'Move slightly right':'Move slightly left',detail:'Center the QR stream inside the guide.',quality:55});
+      const horizontal=Math.abs(cx-.5);
+      const vertical=Math.abs(cy-.5);
+      let title='';
+      if(horizontal>=vertical) title=cx<.5?'Move slightly right':'Move slightly left';
+      else title=cy<.5?'Move slightly down':'Move slightly up';
+      setOpticalGuide({
+        tone:'center',
+        title,
+        detail:'Center the sender screen inside the guide.',
+        quality:55,
+      });
       return;
     }
+
     if(size<.20){
-      setOpticalGuide({tone:'closer',title:'Move a little closer',detail:'The QR is too small for the camera to resolve reliably.',quality:42});
+      setOpticalGuide({
+        tone:'closer',
+        title:'Move a little closer',
+        detail:boxes.length>1
+          ?`The ${boxes.length} QR regions are too small. Bring the phone closer.`
+          :'The QR is too small for reliable camera decoding.',
+        quality:42,
+      });
       return;
     }
+
     if(size>.78){
-      setOpticalGuide({tone:'farther',title:'Move a little farther',detail:'Give the camera more room around the QR.',quality:48});
+      setOpticalGuide({
+        tone:'farther',
+        title:'Move a little farther',
+        detail:'Give the camera more room around the sender screen.',
+        quality:48,
+      });
       return;
     }
+
     if(movement>.07){
-      setOpticalGuide({tone:'steady',title:'Hold steady',detail:'The QR is detected. Keep the phone still for reliable capture.',quality:72});
+      setOpticalGuide({
+        tone:'steady',
+        title:'Hold steady',
+        detail:'QR detected. Keep the phone still while the frame is captured.',
+        quality:72,
+      });
       return;
     }
+
     if(guideStableCountRef.current>=3){
-      setOpticalGuide({tone:'ready',title:'Perfect position — hold steady',detail:'Signal is ready for optical transfer.',quality:96});
+      setOpticalGuide({
+        tone:'ready',
+        title:'Perfect position — hold steady',
+        detail:boxes.length>1
+          ?`${boxes.length} QR lanes detected · signal is ready`
+          :'Signal is ready for optical transfer.',
+        quality:96,
+      });
       return;
     }
-    setOpticalGuide({tone:'steady',title:'Hold steady',detail:'QR detected. Keep the screen inside the guide.',quality:86});
+
+    setOpticalGuide({
+      tone:'steady',
+      title:'Hold steady',
+      detail:boxes.length>1
+        ?`${boxes.length} QR lanes detected · keep the sender screen in view`
+        :'QR detected · keep the sender screen inside the guide.',
+      quality:86,
+    });
   }
 
   function resetDecoder(){
@@ -1290,7 +1346,24 @@ export function Transfer() {
           void job.then(async decoded=>{
             const processStarted=performance.now();
             qrDetectionsRef.current+=decoded.values.length;
-            updateOpticalGuide(decoded.boxes ?? [],width,height,decoded.values.length>0);
+            if(decoded.values.length>0){
+              const guideBoxes=(decoded.boxes ?? []).map(box=>useCenterRecovery
+                ? {
+                    x:Math.floor((sourceWidth-Math.min(sourceWidth,sourceHeight))/2 + (box.x/Math.max(1,width))*Math.min(sourceWidth,sourceHeight)),
+                    y:Math.floor((sourceHeight-Math.min(sourceWidth,sourceHeight))/2 + (box.y/Math.max(1,height))*Math.min(sourceWidth,sourceHeight)),
+                    width:Math.max(1,Math.floor((box.width/Math.max(1,width))*Math.min(sourceWidth,sourceHeight))),
+                    height:Math.max(1,Math.floor((box.height/Math.max(1,height))*Math.min(sourceWidth,sourceHeight))),
+                  }
+                : {
+                    x:Math.floor((box.x/Math.max(1,width))*sourceWidth),
+                    y:Math.floor((box.y/Math.max(1,height))*sourceHeight),
+                    width:Math.max(1,Math.floor((box.width/Math.max(1,width))*sourceWidth)),
+                    height:Math.max(1,Math.floor((box.height/Math.max(1,height))*sourceHeight)),
+                  });
+              updateOpticalGuide(guideBoxes,sourceWidth,sourceHeight,true);
+            }else{
+              updateOpticalGuide([],sourceWidth,sourceHeight,false);
+            }
             if(decoded.values.length>0){
               lastDetectionRef.current=decoded.values[0].slice(0,48);
               noDetectionDecodeCountRef.current=0;
