@@ -103,7 +103,10 @@ export async function createTransfer(file: File) {
 
       const start = (index - 1) * bytesPerFrame;
       const end = Math.min(file.size, start + bytesPerFrame);
-      const chunk = new Uint8Array(await file.slice(start, end).arrayBuffer());
+      // The full file bytes are already resident from createTransfer().
+      // Avoid a second Blob/File read for every optical frame; this removes an
+      // async storage-style round trip from the sender's hot path.
+      const chunk = bytes.subarray(start, end);
       const encoded = toBase64(chunk);
 
       return `${OR_TRANSFER_PREFIX}${session}|${mime}|${encodedName}|${file.size}|${hash}|${index}|${total}|${encoded}`;
