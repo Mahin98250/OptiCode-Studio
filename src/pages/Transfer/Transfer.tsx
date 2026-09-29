@@ -989,14 +989,14 @@ export function Transfer() {
     if(!feedbackEnabled) stopFeedbackCamera();
   },[playing,feedbackEnabled,compat,fountain]);
 
-  async function choose(value?:File){
+  async function choose(value?:File, density: 'legacy' | 'dense' = transferDensity){
     if(!value)return;
     setError(''); setResult(null); stopPlayback(); playbackGroupRef.current=0; setGroup(0); resetDecoder(); clearRenderPipeline(); receiverStartedRef.current=null; solvedRef.current=0; decodedBytesRef.current=0; duplicateCountRef.current=0; detectedWindowRef.current={started:0,count:0}; renderWindowRef.current={started:0,count:0};
     try{
       if(mode==='fountain'){
         const plan=await createFountainTransfer(value); setFountain(plan); setCompat(null);
       }else{
-        const plan=await createTransfer(value,{bytesPerFrame:transferDensity==='dense'?OR_TRANSFER_DENSE_BYTES_PER_FRAME:OR_TRANSFER_BYTES_PER_FRAME}); setCompat(plan); setFountain(null);
+        const plan=await createTransfer(value,{bytesPerFrame:density==='dense'?OR_TRANSFER_DENSE_BYTES_PER_FRAME:OR_TRANSFER_BYTES_PER_FRAME}); setCompat(plan); setFountain(null);
       }
       setFile(value);
     }catch(e){setFile(null);setFountain(null);setCompat(null);setError(e instanceof Error?e.message:'Unable to prepare this file.');}
@@ -1398,7 +1398,7 @@ export function Transfer() {
         <button onClick={()=>inputRef.current?.click()} className="mt-4 w-full rounded-[24px] border border-dashed border-cyan-300/30 bg-cyan-300/[.05] p-8 text-center"><FileUp className="mx-auto text-cyan-300" size={30}/><p className="mt-3 font-bold">Choose any file</p><p className="mt-1 text-xs text-[var(--text-muted)]">{mode==='fountain'?'Up to 64 MB · fountain recovery':'Up to 100 MB · exact sequential recovery'}</p></button>
         <button onClick={()=>{const bytes=new Uint8Array(1024*1024);for(let i=0;i<bytes.length;i+=1)bytes[i]=(i*73+(i%251)*29+(i>>>8))&255;void choose(new File([bytes],'opticode-1mb-benchmark.bin',{type:'application/octet-stream'}));}} className="mt-3 w-full rounded-2xl border border-cyan-300/15 bg-white/5 p-3 text-left"><p className="text-xs font-black text-cyan-200">Canonical 1 MB benchmark fixture</p><p className="mt-1 text-[10px] leading-5 text-[var(--text-muted)]">Deterministic 1,048,576-byte payload for comparable screen-to-camera measurements.</p></button>
         {file&&<div className="mt-4 rounded-2xl bg-white/5 p-4"><p className="truncate font-bold">{file.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{(file.size/1024/1024).toFixed(2)} MB · {mode==='fountain'?`${fountain?.blocks.toLocaleString()} source blocks`:`${compat?.total.toLocaleString()} QR frames · ${compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME} bytes/frame`}</p></div>}
-        {mode==='compatibility'&&<label className="mt-3 block rounded-2xl bg-white/5 p-3 text-xs font-bold">Sequential density<select value={transferDensity} onChange={e=>{const next=e.target.value as 'legacy'|'dense';setTransferDensity(next);if(file){void choose(file);}}} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="dense">360 bytes/frame · ORX2 high density</option><option value="legacy">225 bytes/frame · ORX1 legacy</option></select><p className="mt-1 text-[10px] leading-4 font-normal text-[var(--text-muted)]">ORX1 remains the legacy wire. ORX2 carries density explicitly for exact validation.</p></label>}
+        {mode==='compatibility'&&<label className="mt-3 block rounded-2xl bg-white/5 p-3 text-xs font-bold">Sequential density<select value={transferDensity} onChange={e=>{const next=e.target.value as 'legacy'|'dense';setTransferDensity(next);if(file){void choose(file,next);}}} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="dense">360 bytes/frame · ORX2 high density</option><option value="legacy">225 bytes/frame · ORX1 legacy</option></select><p className="mt-1 text-[10px] leading-4 font-normal text-[var(--text-muted)]">ORX1 remains the legacy wire. ORX2 carries density explicitly for exact validation.</p></label>}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-2xl bg-white/5 p-4"><Gauge size={18} className="text-cyan-300"/><p className="mt-2 text-sm font-bold">High-speed stream</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">Adaptive 1/2/4 QR lanes sized for the sender display, with continuous recovery.</p></div>
           <div className="rounded-2xl bg-white/5 p-4"><ShieldCheck size={18} className="text-emerald-300"/><p className="mt-2 text-sm font-bold">Integrity verified</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">The completed file must match the original SHA-256 hash.</p></div>
