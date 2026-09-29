@@ -100,7 +100,7 @@ export function QRScanner() {
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: .1 });
   const [dragActive, setDragActive] = useState(false);
   const [mode, setMode] = useState<ScanMode>('auto');
-  const [engine, setEngine] = useState('Preparing scanner');
+  const [engine, setEngine] = useState('Getting scanner ready');
   const [supportedFormats, setSupportedFormats] = useState<string[]>([]);
   const [analysis, setAnalysis] = useState<ScanAnalysis | null>(null);
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
@@ -147,7 +147,7 @@ export function QRScanner() {
 
       detectorRef.current = new Constructor({ formats: requested });
       setSupportedFormats(available);
-      setEngine(`Native scanner · ${requested.length} formats`);
+      setEngine(`Scanner ready`);
       return true;
     } catch {
       detectorRef.current = null;
@@ -155,8 +155,8 @@ export function QRScanner() {
     }
   }
 
-  function isFormatAllowed(detectedFormat: string, nextMode = mode) {
-    const normalized = detectedFormat.toLowerCase().replace(/[_-]/g, ' ');
+  function isFormatAllowed(foundFormat: string, nextMode = mode) {
+    const normalized = foundFormat.toLowerCase().replace(/[_-]/g, ' ');
     const isQr = normalized.includes('qr');
     if (nextMode === 'qr') return isQr;
     if (nextMode === 'barcode') return !isQr;
@@ -172,10 +172,10 @@ export function QRScanner() {
       const controls = await reader.decodeFromVideoElement(video, (decoded, decodeError) => {
         if (decoded?.getText()) {
           const value = decoded.getText().trim();
-          const detectedFormat = normalizeFormat(decoded.getBarcodeFormat()?.toString());
-          if (!isFormatAllowed(detectedFormat, nextMode)) return;
+          const foundFormat = normalizeFormat(decoded.getBarcodeFormat()?.toString());
+          if (!isFormatAllowed(foundFormat, nextMode)) return;
 
-          void handleDecoded(value, detectedFormat);
+          void handleDecoded(value, foundFormat);
           if (!isMultiImageQr(value)) stopAfterDecode = true;
           return;
         }
@@ -187,9 +187,9 @@ export function QRScanner() {
         controls.stop();
         zxingControlsRef.current = null;
       }
-      setEngine('ZXing fallback · multi-format');
+      setEngine('Backup scanner');
     } catch {
-      setEngine('QR fallback');
+      setEngine('Basic scanner');
       scanFrame();
     }
   }
@@ -255,9 +255,9 @@ export function QRScanner() {
       }
     } catch (cameraError) {
       const name = cameraError instanceof DOMException ? cameraError.name : '';
-      if (name === 'NotAllowedError') setError('Camera permission was denied. Allow camera access in your browser settings and try again.');
+      if (name === 'NotAllowedError') setError('Camera access was blocked. Allow camera access and try again.');
       else if (name === 'NotFoundError') setError('No camera was found on this device.');
-      else setError('The camera could not be started. Try another camera or upload an image instead.');
+      else setError('The camera could not start. Try again or choose a photo instead.');
     }
   }
 
@@ -272,13 +272,13 @@ export function QRScanner() {
     }
     lastScanRef.current = now;
     const started = now;
-    let detectedCount = 0;
+    let foundCount = 0;
 
     try {
       if (video.readyState >= 2) {
-        const detected = await detectorRef.current.detect(video);
-        detectedCount = detected.length;
-        if (detectedCount) await handleBatchDecoded(detected);
+        const found = await detectorRef.current.detect(video);
+        foundCount = found.length;
+        if (foundCount) await handleBatchDecoded(found);
       }
     } catch {
       // Keep scanning through transient camera/detector errors.
@@ -286,7 +286,7 @@ export function QRScanner() {
 
     const elapsed = performance.now() - started;
     if (elapsed > 80) scanDelayRef.current = Math.min(140, Math.max(scanDelayRef.current, Math.round(elapsed * 0.9)));
-    else if (detectedCount > 0) scanDelayRef.current = Math.max(30, scanDelayRef.current - 6);
+    else if (foundCount > 0) scanDelayRef.current = Math.max(30, scanDelayRef.current - 6);
     else scanDelayRef.current = Math.min(85, scanDelayRef.current + 1);
 
     scanTimerRef.current = window.setTimeout(() => {
@@ -334,7 +334,7 @@ export function QRScanner() {
     stopCamera();
   }
 
-  async function handleDecoded(value: string, detectedFormat = 'qr_code') {
+  async function handleDecoded(value: string, foundFormat = 'qr_code') {
     if (!value) return;
     if (isMultiImageQr(value)) {
       const now = performance.now();
@@ -380,7 +380,7 @@ export function QRScanner() {
       return;
     }
 
-    const displayFormat = normalizeFormat(detectedFormat);
+    const displayFormat = normalizeFormat(foundFormat);
     const nextAnalysis = analyzeScan(value, displayFormat);
     setResult(value);
     setFormat(displayFormat);
@@ -419,10 +419,10 @@ export function QRScanner() {
 
               if (requested.length) {
                 const detector = new Constructor({ formats: requested });
-                const detected = await detector.detect(image);
-                if (detected.length) {
+                const found = await detector.detect(image);
+                if (found.length) {
                   URL.revokeObjectURL(source);
-                  await handleBatchDecoded(detected);
+                  await handleBatchDecoded(found);
                   return;
                 }
               }
@@ -435,12 +435,12 @@ export function QRScanner() {
             const reader = new BrowserMultiFormatReader();
             const decoded = await reader.decodeFromImageElement(image);
             if (decoded?.getText()) {
-              const detectedFormat = normalizeFormat(decoded.getBarcodeFormat()?.toString());
-              if (!isFormatAllowed(detectedFormat)) {
-                throw new Error('Barcode format does not match the selected scan mode.');
+              const foundFormat = normalizeFormat(decoded.getBarcodeFormat()?.toString());
+              if (!isFormatAllowed(foundFormat)) {
+                throw new Error('Barcode is not allowed in the selected scan mode.');
               }
               URL.revokeObjectURL(source);
-              handleDecoded(decoded.getText(), detectedFormat);
+              handleDecoded(decoded.getText(), foundFormat);
               return;
             }
           } catch {
@@ -476,7 +476,7 @@ export function QRScanner() {
           URL.revokeObjectURL(source);
 
           if (code?.data) handleDecoded(code.data, 'qr_code');
-          else setError('No readable QR code or barcode was found. Try a sharper, better-lit image.');
+          else setError('I couldn't read a code from that photo. Try a clearer, brighter photo.');
         } catch {
           URL.revokeObjectURL(source);
           setError('Unable to read this image.');
@@ -528,13 +528,13 @@ export function QRScanner() {
     <div className="scanner-tool space-y-5">
       <div className="scanner-modebar glass-soft flex flex-col gap-3 rounded-[24px] p-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[.16em] text-[var(--text-muted)]">Scan mode</p>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">QR, product and industrial barcodes in one scanner.</p>
+          <p className="text-xs font-bold uppercase tracking-[.16em] text-[var(--text-muted)]">What do you want to scan?</p>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">Scan QR codes or barcodes. You can change this anytime.</p>
         </div>
         <div className="grid grid-cols-3 gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-1">
           {([
             ['auto', 'Auto'],
-            ['qr', 'QR only'],
+            ['qr', 'QR codes'],
             ['barcode', 'Barcode'],
           ] as const).map(([value, label]) => (
             <button
@@ -553,7 +553,7 @@ export function QRScanner() {
           <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/75 to-transparent p-4">
             <div className="flex items-center gap-2 text-xs font-semibold text-white">
               <span className={`h-2 w-2 rounded-full ${scanning ? 'animate-pulse bg-emerald-400' : 'bg-white/30'}`} />
-              {scanning ? 'Scanning live' : 'Camera ready'}
+              {scanning ? 'Scanning…' : 'Ready to scan'}
             </div>
             <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[.16em] text-white/75">
               {format}
@@ -569,7 +569,7 @@ export function QRScanner() {
                     <ScanLine size={30} />
                   </span>
                   <p className="mt-4 text-sm font-semibold text-white">Scan a QR code or barcode</p>
-                  <p className="mt-1 text-xs text-white/50">Move the code inside the large guide and keep it sharp.</p>
+                  <p className="mt-1 text-xs text-white/50">Place the code inside the box and keep it clear.</p>
                 </div>
               </div>
             )}
@@ -588,9 +588,9 @@ export function QRScanner() {
 
           <div className="scanner-camera-actions flex flex-wrap items-center gap-2 border-t border-white/10 bg-black/50 p-3 backdrop-blur-xl">
             <GlassButton onClick={() => void startCamera()} className="bg-white text-slate-950">
-              <Camera size={15} /> {scanning ? 'Restart' : 'Start camera'}
+              <Camera size={15} /> {scanning ? 'Restart' : 'Start scanning'}
             </GlassButton>
-            <GlassButton onClick={stopCamera}><CameraOff size={15} /> Stop</GlassButton>
+            <GlassButton onClick={stopCamera}><CameraOff size={15} /> Stop scanning</GlassButton>
             <GlassButton onClick={toggleCamera} disabled={!streamRef.current} aria-label="Switch camera"><RotateCcw size={15} /></GlassButton>
             <GlassButton onClick={() => void applyCameraControl('torch', !torch)} disabled={!streamRef.current} aria-label="Toggle flashlight"><Flashlight size={15} /></GlassButton>
           </div>
@@ -611,9 +611,9 @@ export function QRScanner() {
             <span className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-cyan-300/20 to-indigo-500/20 text-cyan-300">
               {dragActive ? <Upload size={24} /> : <ImageUp size={24} />}
             </span>
-            <span className="mt-4 text-sm font-bold text-[var(--text)]">Scan from an image</span>
-            <span className="mt-2 max-w-[240px] text-xs leading-5 text-[var(--text-muted)]">Photos, screenshots, product labels, tickets and documents.</span>
-            <span className="mt-5 rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-xs font-semibold text-[var(--text)]">Choose image</span>
+            <span className="mt-4 text-sm font-bold text-[var(--text)]">Scan a photo</span>
+            <span className="mt-2 max-w-[240px] text-xs leading-5 text-[var(--text-muted)]">Use a photo, screenshot, ticket, or product label.</span>
+            <span className="mt-5 rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-xs font-semibold text-[var(--text)]">Choose a photo</span>
             <input type="file" accept="image/*" className="sr-only" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void handleFile(file);
@@ -626,11 +626,11 @@ export function QRScanner() {
               <Sparkles size={14} className="text-cyan-300" /> {engine}
             </div>
             <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
-              Multi-format decoding supports QR plus common 1D/2D formats such as EAN, UPC, Code 128, Code 39, Data Matrix and PDF417 when the browser engine or fallback decoder supports them.
+              The app can read QR codes and many common barcodes. What it can read depends on your device.
             </p>
             {supportedFormats.length > 0 && (
               <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">
-                Native formats detected on this browser: {supportedFormats.map(normalizeFormat).join(' · ')}
+                Code types available on this device: {supportedFormats.map(normalizeFormat).join(' · ')}
               </p>
             )}
           </div>
@@ -658,7 +658,7 @@ export function QRScanner() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-[.16em] text-cyan-300">Multiple codes found</p>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">{batchResults.length} unique QR/barcode results were saved to your library.</p>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">{batchResults.length} codes were found and saved to your saved scans.</p>
             </div>
             <button onClick={() => setBatchResults([])} className="rounded-full p-2 text-[var(--text-muted)] hover:bg-white/10" aria-label="Clear batch results"><RefreshCw size={16} /></button>
           </div>
@@ -687,8 +687,8 @@ export function QRScanner() {
         <div className="overflow-hidden rounded-[28px] border border-cyan-300/20 bg-cyan-300/[.06] p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[.16em] text-cyan-300">Multi-QR Photo</p>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">{multiProgress.received} of {multiProgress.total} unique frames received. Frames can arrive in any order.</p>
+              <p className="text-xs font-bold uppercase tracking-[.16em] text-cyan-300">Photo from multiple QR codes</p>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">{multiProgress.received} of {multiProgress.total} parts received. They can arrive in any order.</p>
             </div>
             <span className="text-sm font-black text-[var(--text)]">{Math.round(multiProgress.received / multiProgress.total * 100)}%</span>
           </div>
@@ -696,8 +696,8 @@ export function QRScanner() {
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0 text-xs leading-5 text-[var(--text-muted)]">
               {multiProgress.missingCount > 0
-                ? <span>{multiProgress.missingCount} frame{multiProgress.missingCount === 1 ? '' : 's'} still missing. Keep the sender looping and keep scanning.</span>
-                : <span className="text-emerald-300">All frames received. Verifying the original image…</span>}
+                ? <span>{multiProgress.missingCount} frame{multiProgress.missingCount === 1 ? '' : 's'} still missing. Keep the other device showing the codes and keep scanning.</span>
+                : <span className="text-emerald-300">Everything received. Putting the photo back together…</span>}
               {multiProgress.missing && multiProgress.missing.length > 0 && (
                 <p className="mt-1 break-words">Missing: {multiProgress.missing.slice(0, 40).join(', ')}{multiProgress.missing.length > 40 ? ` +${multiProgress.missing.length - 40} more` : ''}</p>
               )}
@@ -708,11 +708,11 @@ export function QRScanner() {
                   const missing = await getMultiImageMissingFrames(multiProgress.id);
                   setMultiProgress(prev => prev ? { ...prev, missing } : prev);
                 })(); }}>
-                  <ScanLine size={14}/> Show missing
+                  <ScanLine size={14}/> Show missing parts
                 </GlassButton>
               )}
               <GlassButton onClick={() => { void clearMultiImage(multiProgress.id); setMultiProgress(null); setError(''); }}>
-                <RefreshCw size={14}/> Reset session
+                <RefreshCw size={14}/> Start over
               </GlassButton>
             </div>
           </div>
@@ -721,12 +721,12 @@ export function QRScanner() {
 
       {multiImageResult && (
         <div className="overflow-hidden rounded-[28px] border border-emerald-300/20 bg-emerald-400/[.06] p-5 text-center">
-          <p className="text-xs font-bold uppercase tracking-[.16em] text-emerald-300">Original photo reconstructed</p>
+          <p className="text-xs font-bold uppercase tracking-[.16em] text-emerald-300">Photo restored</p>
           <img src={multiImageResult.url} alt={`Original image reconstructed from Multi-QR frames: ${multiImageResult.name}`} className="mx-auto mt-4 max-h-[640px] max-w-full rounded-2xl object-contain" />
           <p className="mt-3 break-words text-sm font-bold text-[var(--text)]">{multiImageResult.name}</p>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">{(multiImageResult.size / 1024 / 1024).toFixed(2)} MB · original bytes preserved exactly</p>
-          <p className="mt-3 text-xs text-[var(--text-muted)]">No resizing or re-encoding was performed.</p>
-          <a href={multiImageResult.url} download={multiImageResult.name} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-950"><Save size={14}/> Save original image</a>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">{(multiImageResult.size / 1024 / 1024).toFixed(2)} MB · original quality preserved</p>
+          <p className="mt-3 text-xs text-[var(--text-muted)]">The original photo was kept as-is.</p>
+          <a href={multiImageResult.url} download={multiImageResult.name} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-950"><Save size={14}/> Save photo</a>
           <GlassButton onClick={() => { URL.revokeObjectURL(multiImageResult.url); setMultiImageResult(null); }} className="ml-2"><RefreshCw size={14}/> Clear</GlassButton>
         </div>
       )}
@@ -735,7 +735,7 @@ export function QRScanner() {
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.16em] text-emerald-300">
               {format.includes('QR') ? <CheckCircle2 size={16} /> : <ScanBarcode size={16} />}
-              {format} detected
+              {format} found
             </div>
             <button onClick={() => { setResult(''); setError(''); setAnalysis(null); setBatchResults([]); }} className="rounded-full p-2 text-[var(--text-muted)] hover:bg-white/10" aria-label="Clear result">
               <RefreshCw size={16} />
