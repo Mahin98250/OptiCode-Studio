@@ -474,8 +474,8 @@ export function Transfer() {
     if(!plan) return;
 
     setError('');
+    resetFeedbackState();
     if(feedbackEnabled){
-      setFeedbackState('searching');
       void startFeedbackCamera();
     }
     playbackGroupRef.current=0;
