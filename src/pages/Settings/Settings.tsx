@@ -3,14 +3,14 @@ import { Database, Download, HardDrive, MoonStar, ShieldCheck, Trash2, Upload } 
 import { GlassCard } from '../../components/ui/GlassCard';
 import { GlassButton } from '../../components/ui/GlassButton';
 import { useTheme } from '../../components/providers/ThemeProvider';
-import { clearHistory, exportHistory, getHistory, getSpace usedUsageBytes, importHistory } from '../../lib/storage';
+import { clearHistory, exportHistory, getHistory, getStorageUsageBytes, importHistory } from '../../lib/storage';
 
 export function Settings() {
   const { theme, setTheme } = useTheme();
   const [notice, setNotice] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
   const items = getHistory();
-  const usage = getSpace usedUsageBytes();
+  const usage = getStorageUsageBytes();
 
   function downloadBackup() {
     const blob = new Blob([exportHistory()], { type: 'application/json' });
