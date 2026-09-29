@@ -7,6 +7,7 @@ import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from './optifra
 import { cropOptiLaneGrid, createOptiFrameCanvasCache, createOptiLaneSurface, getOptiLaneLayout, type OptiLaneCount } from './optiframeLanes';
 import { OptiFrameDecodePool } from './optiframeDecodePool';
 import { createAdaptiveTransmission } from './adaptiveTransmission';
+import { createAckPayload, getAckMissingIndexes, parseAckPayload, setAckBit } from './opticalControl';
 import { createFountainDecoder, createFountainTransfer, parseFountainFrame, type FountainDroplet } from './fountain';
 import {
   addMultiImageChunk,
@@ -767,6 +768,45 @@ async function parserValidation() {
   return 'Malformed hashes and oversized payloads were rejected before storage';
 }
 
+async function opticalAckRoundTrip() {
+  const total = 60;
+  const bitmap = new Uint8Array(Math.ceil(total / 8));
+  for (let index = 1; index < total; index += 1) setAckBit(bitmap, index, true);
+
+  const payload = createAckPayload({
+    session: 'ack-diagnostic',
+    mode: 'compatibility',
+    total,
+    received: 59,
+    firstMissing: 60,
+    bitmap,
+    sequence: 7,
+    state: 'streaming',
+  });
+  const parsed = parseAckPayload(payload);
+  assert(parsed, 'Optical ACK payload did not parse.');
+  assert(parsed.session === 'ack-diagnostic' && parsed.total === 60, 'Optical ACK metadata mismatch.');
+  assert(parsed.received === 59 && parsed.sequence === 7, 'Optical ACK counters mismatch.');
+  const missing = getAckMissingIndexes(parsed);
+  assert(missing.length === 1 && missing[0] === 60, 'Optical ACK bitmap did not surface missing frame #60.');
+
+  setAckBit(bitmap, 60, true);
+  const completePayload = createAckPayload({
+    session: 'ack-diagnostic',
+    mode: 'compatibility',
+    total,
+    received: 60,
+    firstMissing: 60,
+    bitmap,
+    sequence: 8,
+    state: 'complete',
+  });
+  const complete = parseAckPayload(completePayload);
+  assert(complete?.state === 'complete', 'Optical ACK completion state did not round-trip.');
+  assert(getAckMissingIndexes(complete).length === 0, 'Optical ACK still reported a missing frame after completion.');
+  return '59/60 bitmap surfaced frame #60 · completion ACK cleared the missing set';
+}
+
 export type ProtocolDiagnosticProgress = {
   completed: number;
   total: number;
@@ -796,6 +836,7 @@ export async function runProtocolDiagnostics(
 
   const cases: ProtocolDiagnosticCase[] = [
     ['OR Transfer · round trip', transferRoundTrip],
+    ['Optical control · ACK/NACK round trip', opticalAckRoundTrip],
     ['OR Transfer · fountain round trip', fountainRoundTrip],
     ['OR Transfer · fountain recovery stress', fountainRecoveryStress],
     ['OR Transfer · fountain seed continuity', fountainSeedContinuity],
