@@ -49,7 +49,7 @@ export function History() {
     }
   }
 
-  function downloadSave backup() {
+  function downloadBackup() {
     const blob = new Blob([exportHistory()], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -79,7 +79,7 @@ export function History() {
           <p className="mt-3 text-sm leading-7 text-[var(--text-muted)] sm:text-base">Find your saved QR codes and barcodes, copy them, open them, or organize them.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <GlassButton type="button" onClick={downloadSave backup}><Download size={14} /> Save backup</GlassButton>
+          <GlassButton type="button" onClick={downloadBackup}><Download size={14} /> Save backup</GlassButton>
           <GlassButton type="button" onClick={() => inputRef.current?.click()}><Upload size={14} /> Restore backup</GlassButton>
           <input ref={inputRef} type="file" accept="application/json,.json" className="sr-only" onChange={(event) => {
             const file = event.target.files?.[0];
