@@ -5,7 +5,8 @@ import { Activity, CheckCircle2, Download, FileUp, Gauge, LockKeyhole, Radio, Sc
 import { Link } from 'react-router-dom';
 import { QrDecodePool } from '../../lib/qrDecodePool';
 import { createBenchmarkStart, finishBenchmark, type BenchmarkSample, type OpticalBenchmark } from '../../lib/opticalBenchmark';
-import { addTransferFrame, createTransfer, isTransferFrame, parseTransferFrame, reconstructTransfer } from '../../lib/orTransfer';
+import { addTransferFrame, createTransfer, getTransferReceivedFrames, isTransferFrame, parseTransferFrame, reconstructTransfer } from '../../lib/orTransfer';
+import { createAckPayload, getAckMissingIndexes, parseAckPayload, setAckBit } from '../../lib/opticalControl';
 import { createQrMatrices, drawQrMatricesToCanvas } from '../../lib/qrCanvas';
 import { QrEncodePool, type QrEncodeResult } from '../../lib/qrEncodePool';
 import { createFountainDecoder, createFountainTransfer, FOUNTAIN_BLOCK_BYTES, FOUNTAIN_GRID_SIZE, isFountainFrame, parseFountainFrame, type FountainDecoder, type FountainDroplet, type FountainPlan } from '../../lib/fountain';
@@ -85,6 +86,14 @@ export function Transfer() {
   const [benchmark,setBenchmark]=useState<OpticalBenchmark|null>(null);
   const [telemetry,setTelemetry]=useState<Telemetry>({startedAt:null,renderMs:0,encodeMs:0,prefetchReady:0,encoderWorkers:0,renderCount:0,renderFps:0,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,nativeCalls:0,nativeAssist:false,zxingCalls:0,zxingAssist:false,lastDetection:'—'});
   const [screenAwake,setScreenAwake]=useState(false);
+  const [feedbackEnabled,setFeedbackEnabled]=useState(true);
+  const [feedbackConnected,setFeedbackConnected]=useState(false);
+  const [feedbackReceived,setFeedbackReceived]=useState(0);
+  const [feedbackTotal,setFeedbackTotal]=useState(0);
+  const [feedbackMissing,setFeedbackMissing]=useState<number[]>([]);
+  const [feedbackState,setFeedbackState]=useState<'searching'|'connected'|'complete'|'unavailable'>('searching');
+  const [feedbackLastAt,setFeedbackLastAt]=useState<number|null>(null);
+  const [ackPayload,setAckPayload]=useState('');
   const inputRef=useRef<HTMLInputElement>(null);
   const videoRef=useRef<HTMLVideoElement>(null);
   const streamRef=useRef<MediaStream|null>(null);
@@ -143,6 +152,24 @@ export function Transfer() {
   const [probeStatus,setProbeStatus]=useState('Not run');
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
+  const feedbackVideoRef=useRef<HTMLVideoElement>(null);
+  const feedbackStreamRef=useRef<MediaStream|null>(null);
+  const feedbackReaderRef=useRef<ZxingReader|null>(null);
+  const feedbackControlsRef=useRef<ZxingControls|null>(null);
+  const feedbackPoolRef=useRef<QrDecodePool|null>(null);
+  const feedbackCanvasRef=useRef<HTMLCanvasElement|null>(null);
+  const feedbackLoopRef=useRef<number|null>(null);
+  const feedbackActiveRef=useRef(false);
+  const feedbackLastAckSeqRef=useRef(-1);
+  const feedbackMissingSetRef=useRef(new Set<number>());
+  const feedbackRetryIndexRef=useRef<number|null>(null);
+  const feedbackRetryRepeatRef=useRef(0);
+  const compatAckBitmapRef=useRef<Uint8Array|null>(null);
+  const compatAckFirstMissingRef=useRef(1);
+  const compatAckSessionRef=useRef<string|null>(null);
+  const compatAckSequenceRef=useRef(0);
+  const ackCanvasRef=useRef<HTMLCanvasElement|null>(null);
+  const resultUrlRef=useRef<string|null>(null);
 
   function getOpticalCanvasSize(canvas:HTMLCanvasElement){
     const cssWidth=Math.max(280,Math.floor(canvas.getBoundingClientRect().width || canvas.clientWidth || window.innerWidth));
@@ -167,7 +194,25 @@ export function Transfer() {
     };
   },[]);
 
-  useEffect(()=>()=>{ stopReceive(); stopPlayback(); if(result?.url) URL.revokeObjectURL(result.url); void wakeLockRef.current?.release().catch(()=>{}); wakeLockRef.current=null; },[result]);
+  useEffect(()=>{
+    const previous=resultUrlRef.current;
+    const next=result?.url ?? null;
+    resultUrlRef.current=next;
+    if(previous && previous!==next) URL.revokeObjectURL(previous);
+  },[result]);
+
+  useEffect(()=>()=>{
+    stopReceive();
+    stopPlayback();
+    if(resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+    void wakeLockRef.current?.release().catch(()=>{});
+    wakeLockRef.current=null;
+  },[]);
+
+  useEffect(()=>{
+    if(!ackPayload || !ackCanvasRef.current) return;
+    try{drawQrMatricesToCanvas(ackCanvasRef.current,createQrMatrices([ackPayload]),280,12);}catch{}
+  },[ackPayload]);
 
   async function setScreenWakeLock(active:boolean){
     if(!active){
