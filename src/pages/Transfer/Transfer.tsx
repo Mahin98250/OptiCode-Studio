@@ -1339,7 +1339,7 @@ export function Transfer() {
         }
         // Keep the normal acquisition job to ONE jsQR pass. Quadrant recovery
         // is a last-resort mode after sustained misses, not the default path.
-        const decodeDepth=misses>=12?1:0;
+        const decodeDepth=misses>=12 || cameraFramesRef.current%10===0 ? 1 : 0;
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth);
         if(job){
           decoderCallsRef.current+=1;
