@@ -10,6 +10,7 @@ type StoredSession = {
   size: number;
   hash: string;
   total: number;
+  bytesPerFrame?: number;
   createdAt: number;
 };
 
