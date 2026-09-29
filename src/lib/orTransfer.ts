@@ -85,7 +85,7 @@ export async function createTransfer(file: File, options: { bytesPerFrame?: numb
   // Generate frames on demand so the sender does not hold every QR payload
   // in memory at once. The dense profile stays bounded so QR size does not
   // grow without limit.
-  const requestedBytes = Math.floor(options.bytesPerFrame ?? OR_TRANSFER_DENSE_BYTES_PER_FRAME);
+  const requestedBytes = Math.floor(options.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME);
   const bytesPerFrame = Math.max(
     OR_TRANSFER_BYTES_PER_FRAME,
     Math.min(OR_TRANSFER_MAX_BYTES_PER_FRAME, requestedBytes),
