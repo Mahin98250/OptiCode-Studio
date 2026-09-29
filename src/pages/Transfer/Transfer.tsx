@@ -1046,7 +1046,7 @@ export function Transfer() {
       if(added.complete){
         const rebuilt=await reconstructTransfer(frame.session);
         if(compatibilitySessionRef.current!==sessionAtStart)return;
-        if(rebuilt){if(benchmarking) await finishBenchmarkRun(); setResult({url:rebuilt.url,name:rebuilt.name,size:rebuilt.size,mime:rebuilt.mime});setProgress(null);stopReceive();}
+        if(rebuilt){if(benchmarking) await finishBenchmarkRun(); setResult({url:rebuilt.url,name:rebuilt.name,size:rebuilt.size,mime:rebuilt.mime});setProgress(null);stopReceive(true);}
       }
     }
   }
