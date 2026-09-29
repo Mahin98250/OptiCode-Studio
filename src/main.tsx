@@ -6,9 +6,14 @@ import './styles/globals.css';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/OptiCode-Studio/sw.js', { scope: '/OptiCode-Studio/' }).catch(() => {
-      // Keep the app fully usable even if service worker registration is unavailable.
-    });
+    navigator.serviceWorker
+      .register('/OptiCode-Studio/sw.js', {
+        scope: '/OptiCode-Studio/',
+        updateViaCache: 'none',
+      })
+      .catch(() => {
+        // Keep the app fully usable even if service worker registration is unavailable.
+      });
   });
 }
 
