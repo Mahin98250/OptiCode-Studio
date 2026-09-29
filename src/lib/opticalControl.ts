@@ -97,18 +97,21 @@ export function createAckPayload(input: {
 
 export function parseAckPayload(value: string): OpticalAck | null {
   const parts = value.split('|');
-  if (!parts.length || !parts[0].startsWith(OPTICAL_ACK_PREFIX) || parts.length !== 10) return null;
+  if (!parts.length || !parts[0].startsWith(OPTICAL_ACK_PREFIX) || (parts.length !== 9 && parts.length !== 10)) return null;
 
+  const legacy = parts.length === 9;
   const session = parts[0].slice(OPTICAL_ACK_PREFIX.length);
   const mode = parts[1] as OpticalAckMode;
   const total = Number(parts[2]);
   const received = Number(parts[3]);
-  const frontier = Number(parts[4]);
-  const base = Number(parts[5]);
-  const windowBits = Number(parts[6]);
-  const bitmapRaw = parts[7];
-  const sequence = Number(parts[8]);
-  const state = parts[9] as OpticalAckState;
+  const frontier = legacy
+    ? (parts[8] === 'complete' ? total : 0)
+    : Number(parts[4]);
+  const base = Number(legacy ? parts[4] : parts[5]);
+  const windowBits = Number(legacy ? parts[5] : parts[6]);
+  const bitmapRaw = parts[legacy ? 6 : 7];
+  const sequence = Number(legacy ? parts[7] : parts[8]);
+  const state = parts[legacy ? 8 : 9] as OpticalAckState;
 
   if (
     !session ||
