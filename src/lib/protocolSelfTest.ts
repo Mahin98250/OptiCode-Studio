@@ -86,6 +86,48 @@ function descendingByFrame<T extends { index: number }>(items: T[]) {
   return [...items].sort((a, b) => b.index - a.index);
 }
 
+async function transferDenseFrameDiagnostic() {
+  const original = makeBytes(1_800, 141);
+  const file = new File([original], 'diagnostic-dense.bin', { type: 'application/octet-stream' });
+  const plan = await createTransfer(file, { bytesPerFrame: 360 });
+  assert(plan.bytesPerFrame === 360, 'Dense transfer plan did not select 360 bytes/frame.');
+  const raw = plan.getFrame(1);
+  assert(raw.startsWith('ORX2:'), 'Dense transfer did not emit ORX2.');
+  const parsed = parseTransferFrame(raw);
+  assert(parsed, 'ORX2 dense frame did not parse.');
+  assert(parsed.bytesPerFrame === 360, 'ORX2 bytes-per-frame metadata mismatch.');
+  assert(parsed.total === Math.ceil(file.size / 360), 'ORX2 total-frame calculation mismatch.');
+  assert(parsed.data.length === 480, 'ORX2 full data budget is not 480 Base64 characters.');
+  return 'ORX2 · 360 raw bytes/frame · ' + parsed.total + ' total frames · explicit density metadata verified';
+}
+
+async function qrDenseTransferFrameWorkerDiagnostic() {
+  if (typeof Worker === 'undefined') return 'Worker API unavailable; ORX2 parser coverage remains active.';
+
+  const original = makeBytes(360, 217);
+  const file = new File([original], 'diagnostic-orx2-360b.bin', { type: 'application/octet-stream' });
+  const plan = await createTransfer(file, { bytesPerFrame: 360 });
+  const raw = plan.getFrame(1);
+  const parsed = parseTransferFrame(raw);
+  assert(parsed && raw.startsWith('ORX2:'), 'Dense worker fixture is not a valid ORX2 frame.');
+  assert(parsed.data.length === 480, 'Dense worker fixture did not reach the 480-character Base64 budget.');
+
+  const canvas = document.createElement('canvas');
+  drawQrMatricesToCanvas(canvas, createQrMatrices([raw]), 720, 18);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  assert(ctx, 'Dense QR diagnostic canvas context unavailable.');
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pool = new QrDecodePool(1);
+  try {
+    const result = await pool.decode(image.data.buffer, image.width, image.height, 0);
+    assert(result, 'Dense QR worker returned no result.');
+    assert(result.values.includes(raw), 'QR worker failed to recover the exact ORX2 payload.');
+    return 'Exact ORX2 frame · ' + raw.length + ' chars · 360 raw bytes · 1-region worker decode';
+  } finally {
+    pool.terminate();
+  }
+}
+
 async function transferFrameHotPathDiagnostic() {
   const original = makeBytes(256 * 1024, 73);
   const file = new File([original], 'frame-hot-path.bin', { type: 'application/octet-stream' });
@@ -701,6 +743,7 @@ async function scanFormatCompatibility() {
     { input: '4006381333931', kind: 'barcode', title: 'Barcode' },
     { input: 'ORIMG1:data:image/jpeg;base64,AAAA', kind: 'image', title: 'Image QR' },
     { input: 'ORX1:test|application%2Foctet-stream|ZmlsZS5iaW4|2048|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|1|3|AAAA', kind: 'or-transfer', title: 'OR Transfer frame', actionUrl: '#/transfer' },
+    { input: 'ORX2:test|application%2Foctet-stream|ZmlsZS5iaW4|4096|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|1|12|360|' + 'A'.repeat(480), kind: 'or-transfer', title: 'OR Transfer frame', actionUrl: '#/transfer' },
   ] as const;
 
   for (const test of cases) {
@@ -793,7 +836,16 @@ async function parserValidation() {
   const transferOversized = 'ORX1:session|application%2Foctet-stream|Zg|1|' + 'a'.repeat(64) + '|1|1|' +  'A'.repeat(OR_TRANSFER_CHUNK_CHARS + 1);
   assert(parseTransferFrame(transferOversized) === null, 'Oversized OR Transfer payload was accepted.');
 
-  return 'Malformed hashes and oversized payloads were rejected before storage';
+  const denseValid = 'ORX2:session|application%2Foctet-stream|Zg|360|' + 'a'.repeat(64) + '|1|1|360|' + 'A'.repeat(480);
+  assert(parseTransferFrame(denseValid)?.bytesPerFrame === 360, 'Valid ORX2 dense frame was rejected.');
+
+  const denseBadSize = denseValid.replace('|1|1|360|', '|1|2|360|');
+  assert(parseTransferFrame(denseBadSize) === null, 'ORX2 frame with inconsistent total was accepted.');
+
+  const denseOversized = denseValid.replace('A'.repeat(480), 'A'.repeat(481));
+  assert(parseTransferFrame(denseOversized) === null, 'ORX2 frame exceeded its declared Base64 budget.');
+
+  return 'Malformed hashes, legacy overflow, and ORX2 density violations were rejected before storage';
 }
 
 async function opticalAckRoundTrip() {
@@ -887,6 +939,8 @@ export async function runProtocolDiagnostics(
   }
 
   const cases: ProtocolDiagnosticCase[] = [
+    ['OR Transfer · dense 360-byte frame', transferDenseFrameDiagnostic],
+    ['Performance · exact ORX2 dense QR frame', qrDenseTransferFrameWorkerDiagnostic],
     ['OR Transfer · frame hot path', transferFrameHotPathDiagnostic],
     ['OR Transfer · round trip', transferRoundTrip],
     ['Optical control · ACK/NACK round trip', opticalAckRoundTrip],
