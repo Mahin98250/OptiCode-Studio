@@ -17,6 +17,7 @@ import {
   parseMultiImageQr,
   reconstructMultiImage,
 } from './imageQr';
+import { estimateOpticalSpeed, frameGenerationCeiling } from './opticalSpeedLab';
 import {
   OR_TRANSFER_CHUNK_CHARS,
   addTransferFrame,
@@ -83,6 +84,33 @@ async function runCase(name: string, fn: () => Promise<string>): Promise<Protoco
 
 function descendingByFrame<T extends { index: number }>(items: T[]) {
   return [...items].sort((a, b) => b.index - a.index);
+}
+
+async function transferFrameHotPathDiagnostic() {
+  const original = makeBytes(256 * 1024, 73);
+  const file = new File([original], 'frame-hot-path.bin', { type: 'application/octet-stream' });
+  const plan = await createTransfer(file);
+  const started = performance.now();
+  let totalChars = 0;
+  for (let index = 1; index <= plan.total; index += 1) {
+    const frame = await plan.getFrame(index);
+    assert(frame.startsWith('ORX1:'), 'Hot-path frame prefix mismatch.');
+    totalChars += frame.length;
+  }
+  const elapsed = performance.now() - started;
+  assert(totalChars > plan.total * OR_TRANSFER_CHUNK_CHARS, 'Hot-path frames unexpectedly lost payload data.');
+
+  const estimate = estimateOpticalSpeed({
+    fileBytes: file.size,
+    payloadBytesPerFrame: 225,
+    intervalMs: 500,
+    dwell: 1,
+    lanes: 1,
+    finalExtraDwells: 3,
+  });
+  const ceiling = frameGenerationCeiling(file.size, elapsed);
+  assert(Number.isFinite(ceiling) && ceiling > 0, 'Frame generation benchmark returned an invalid rate.');
+  return plan.total + ' frames generated from resident bytes in ' + Math.round(elapsed) + ' ms · generation ' + ceiling.toFixed(1) + ' KB/s CPU ceiling · optical dwell ceiling ' + (estimate.theoreticalMs / 1000).toFixed(1) + ' s for 256 KiB';
 }
 
 async function transferRoundTrip() {
@@ -859,6 +887,7 @@ export async function runProtocolDiagnostics(
   }
 
   const cases: ProtocolDiagnosticCase[] = [
+    ['OR Transfer · frame hot path', transferFrameHotPathDiagnostic],
     ['OR Transfer · round trip', transferRoundTrip],
     ['Optical control · ACK/NACK round trip', opticalAckRoundTrip],
     ['OR Transfer · fountain round trip', fountainRoundTrip],
