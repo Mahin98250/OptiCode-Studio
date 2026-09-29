@@ -8,9 +8,12 @@ type DecodeRequest = {
   maxDepth?:number;
 };
 
+type DecodeBox = { x:number; y:number; width:number; height:number };
+
 type DecodeResult = {
   id:number;
   values:string[];
+  boxes:DecodeBox[];
   regionsScanned:number;
   processingMs:number;
 };
@@ -20,6 +23,7 @@ const keyFor=(value:string)=>value.length>180?value.slice(0,180):value;
 function decode(request:DecodeRequest):DecodeResult{
   const started=performance.now();
   const values:string[]=[];
+  const boxes:DecodeBox[]=[];
   const localSeen=new Set<string>();
   let regionsScanned=0;
   const data=new Uint8ClampedArray(request.buffer);
@@ -32,12 +36,20 @@ function decode(request:DecodeRequest):DecodeResult{
   // acquisition path and enables regional recovery only after misses.
   const maxDepth=Math.max(0,Math.min(1,request.maxDepth??1));
 
-  const add=(value?:string)=>{
+  const add=(value?:string, location?:{topLeftCorner?:{x:number;y:number};topRightCorner?:{x:number;y:number};bottomLeftCorner?:{x:number;y:number};bottomRightCorner?:{x:number;y:number}})=>{
     if(!value)return;
     const key=keyFor(value);
     if(localSeen.has(key))return;
     localSeen.add(key);
     values.push(value);
+    if(location){
+      const points=[location.topLeftCorner,location.topRightCorner,location.bottomLeftCorner,location.bottomRightCorner].filter((point):point is {x:number;y:number}=>Boolean(point));
+      if(points.length>=2){
+        const xs=points.map(point=>point.x);
+        const ys=points.map(point=>point.y);
+        boxes.push({x:Math.max(0,Math.min(...xs)),y:Math.max(0,Math.min(...ys)),width:Math.max(1,Math.max(...xs)-Math.min(...xs)),height:Math.max(1,Math.max(...ys)-Math.min(...ys))});
+      }
+    }
   };
 
   // Reuse one worker-local scratch buffer for cropped regions. The previous
@@ -60,7 +72,8 @@ function decode(request:DecodeRequest):DecodeResult{
         // The sender always emits standard black-on-white QR modules.
         // Keep the hot path to one jsQR attempt. Inversion is reserved for
         // recovery crops so a missed normal QR does not double every decode.
-        add(jsQR(data,request.width,request.height,{inversionAttempts:'dontInvert'})?.data);
+        const decoded=jsQR(data,request.width,request.height,{inversionAttempts:'dontInvert'});
+        add(decoded?.data,decoded?.location);
         return;
       }
 
@@ -73,9 +86,12 @@ function decode(request:DecodeRequest):DecodeResult{
       }
 
       const crop=scratch.subarray(0,required);
-      const fast=jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'dontInvert'})?.data;
-      if(fast) add(fast);
-      else if(maxDepth>=1) add(jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'attemptBoth'})?.data);
+      const fast=jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'dontInvert'});
+      if(fast) add(fast.data,{topLeftCorner:{x:fast.location.topLeftCorner.x+x,y:fast.location.topLeftCorner.y+y},topRightCorner:{x:fast.location.topRightCorner.x+x,y:fast.location.topRightCorner.y+y},bottomLeftCorner:{x:fast.location.bottomLeftCorner.x+x,y:fast.location.bottomLeftCorner.y+y},bottomRightCorner:{x:fast.location.bottomRightCorner.x+x,y:fast.location.bottomRightCorner.y+y}});
+      else if(maxDepth>=1){
+        const recovered=jsQR(crop,clippedWidth,clippedHeight,{inversionAttempts:'attemptBoth'});
+        if(recovered) add(recovered.data,{topLeftCorner:{x:recovered.location.topLeftCorner.x+x,y:recovered.location.topLeftCorner.y+y},topRightCorner:{x:recovered.location.topRightCorner.x+x,y:recovered.location.topRightCorner.y+y},bottomLeftCorner:{x:recovered.location.bottomLeftCorner.x+x,y:recovered.location.bottomLeftCorner.y+y},bottomRightCorner:{x:recovered.location.bottomRightCorner.x+x,y:recovered.location.bottomRightCorner.y+y}});
+      }
     }catch{
       // A single bad region must never kill the camera loop.
     }
@@ -104,6 +120,7 @@ function decode(request:DecodeRequest):DecodeResult{
   return {
     id:request.id,
     values,
+    boxes,
     regionsScanned,
     processingMs:performance.now()-started,
   };
@@ -117,5 +134,5 @@ type WorkerScope={
 const scope=self as unknown as WorkerScope;
 scope.onmessage=(event)=>{
   try{scope.postMessage(decode(event.data));}
-  catch{scope.postMessage({id:event.data.id,values:[],regionsScanned:0,processingMs:0});}
+  catch{scope.postMessage({id:event.data.id,values:[],boxes:[],regionsScanned:0,processingMs:0});}
 };
