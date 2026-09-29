@@ -997,7 +997,7 @@ export function Transfer() {
       const searching=misses<5;
       setOpticalGuide({
         tone:searching?'searching':'closer',
-        title:searching?'Point at the other device's screen':'Move a little closer',
+        title:searching?"Point at the other device's screen":'Move a little closer',
         detail:searching
           ?'Keep the sender display inside the camera guide.'
           :'Make the QR stream large enough for the camera to resolve reliably.',
