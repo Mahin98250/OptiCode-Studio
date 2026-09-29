@@ -39,11 +39,11 @@ export function Statistics() {
     <section className="statistics-page mx-auto max-w-5xl py-8 sm:py-10">
       <div className="mb-7">
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-soft)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[.16em] text-[var(--text-muted)]">
-          <Sparkles size={12} className="text-cyan-300" /> Local analytics
+          <Sparkles size={12} className="text-cyan-300" /> Your activity
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight text-[var(--text)] sm:text-5xl">Scan Statistics</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-[var(--text)] sm:text-5xl">Scan activity</h1>
         <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--text-muted)] sm:text-base">
-          A private dashboard built from the scan library stored in this browser. Nothing is uploaded to a server.
+          A simple view of your saved scans. Nothing is uploaded to a server.
         </p>
       </div>
 
@@ -66,7 +66,7 @@ export function Statistics() {
         <GlassCard>
           <div className="flex items-center gap-2">
             <BarChart3 size={18} className="text-cyan-300" />
-            <div><h2 className="font-bold text-[var(--text)]">Scan types</h2><p className="text-xs text-[var(--text-muted)]">What you scan most often</p></div>
+            <div><h2 className="font-bold text-[var(--text)]">What you scan</h2><p className="text-xs text-[var(--text-muted)]">Your most common scan types</p></div>
           </div>
           <div className="mt-6 space-y-4">
             {stats.byKind.length === 0 ? (
@@ -105,9 +105,9 @@ export function Statistics() {
 
       <div className="mt-5">
         <GlassCard>
-          <div className="flex items-center gap-2"><BarChart3 size={18} className="text-cyan-300" /><div><h2 className="font-bold text-[var(--text)]">Collections by tag</h2><p className="text-xs text-[var(--text-muted)]">Your most-used local labels</p></div></div>
+          <div className="flex items-center gap-2"><BarChart3 size={18} className="text-cyan-300" /><div><h2 className="font-bold text-[var(--text)]">Saved labels</h2><p className="text-xs text-[var(--text-muted)]">Labels you use most often</p></div></div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {tagCounts.length === 0 ? <p className="text-sm text-[var(--text-muted)]">Add tags in the Scan Library to create lightweight collections.</p> : tagCounts.map(([tag, count]) => (
+            {tagCounts.length === 0 ? <p className="text-sm text-[var(--text-muted)]">Add labels to saved scans to group them.</p> : tagCounts.map(([tag, count]) => (
               <div key={tag} className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3">
                 <div className="flex justify-between text-xs font-semibold"><span className="text-[var(--text)]">#{tag}</span><span className="text-[var(--text-muted)]">{count}</span></div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-soft)]"><div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-indigo-500" style={{ width: (count / maxTag) * 100 + '%' }} /></div>
