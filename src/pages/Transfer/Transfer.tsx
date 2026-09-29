@@ -74,14 +74,14 @@ export function Transfer() {
   const [playing,setPlaying]=useState(false);
   // Reliability-first physical MVP: each compatibility QR is displayed long
   // enough for a slow camera to acquire it, and compatibility playback repeats it.
-  const [intervalMs,setIntervalMs]=useState(700);
+  const [intervalMs,setIntervalMs]=useState(500);
   // Protect the final compatibility frame with an explicit acquisition tail.
   const FINAL_FRAME_EXTRA_DWELLS=3;
   const [error,setError]=useState('');
   const [receiving,setReceiving]=useState(false);
   const [progress,setProgress]=useState<Progress|null>(null);
   const [result,setResult]=useState<Result|null>(null);
-  const [autoTune,setAutoTune]=useState(false);
+  const [autoTune,setAutoTune]=useState(true);
   const [benchmarking,setBenchmarking]=useState(false);
   const [benchmark,setBenchmark]=useState<OpticalBenchmark|null>(null);
   const [telemetry,setTelemetry]=useState<Telemetry>({startedAt:null,renderMs:0,encodeMs:0,prefetchReady:0,encoderWorkers:0,renderCount:0,renderFps:0,detectedPerSecond:0,solvedPerSecond:0,goodputKbps:0,duplicates:0,decodeMs:0,processMs:0,scanDelayMs:55,cameraFrames:0,decoderCalls:0,qrDetections:0,transferFrames:0,nativeCalls:0,nativeAssist:false,zxingCalls:0,zxingAssist:false,lastDetection:'—'});
@@ -426,6 +426,7 @@ export function Transfer() {
                 if(avgRender<9 && fps>45 && intervalMs>120)setIntervalMs(v=>Math.max(120,v-10));
                 else if(avgRender>42 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+25));
               }
+            }
             renderWindowStatsRef.current={started:now,count:0,renderMs:0};
           }
 
@@ -458,7 +459,7 @@ export function Transfer() {
     void loadGroup(group,true);
     for(const index of groupIndices.slice(1)) void loadGroup(index,false);
     return()=>{cancelled=true;};
-  },[fountain,compat,autoTune,intervalMs,playing]);
+  },[fountain,compat,autoTune]);
 
   async function startPlayback(){
     const plan=fountain ?? compat;
@@ -1347,7 +1348,7 @@ export function Transfer() {
           </div>
         </div>}
         {(fountain||compat)&&<div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Auto tune<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On · render-safe</option><option value="off">Off · manual</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="300">300 ms · turbo</option><option value="450">450 ms · fast</option><option value="500">500 ms · fast + margin</option><option value="700">700 ms · balanced</option><option value="1000">1000 ms · reliable</option><option value="1300">1300 ms · extra margin</option><option value="1600">1600 ms · maximum reliability</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Engine</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Render</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Payload</b><p className="mt-1 text-[var(--text-muted)]">{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':'225 raw bytes/frame · 2× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Display lanes</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · MVP keeps mobile transfer at one physical lane</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Recovery</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Fountain':'Sequential'}</p></div></div>}
+          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Auto tune<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On · render-safe</option><option value="off">Off · manual</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="300">300 ms · turbo</option><option value="450">450 ms · fast</option><option value="500">500 ms · fast + margin</option><option value="700">700 ms · balanced</option><option value="1000">1000 ms · reliable</option><option value="1300">1300 ms · extra margin</option><option value="1600">1600 ms · maximum reliability</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Engine</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Render</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Payload</b><p className="mt-1 text-[var(--text-muted)]">{fountain?FOUNTAIN_BLOCK_BYTES+' bytes/block':'225 raw bytes/frame · 1× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Display lanes</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · MVP keeps mobile transfer at one physical lane</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Recovery</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Fountain':'Sequential'}</p></div></div>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
       <div className="transfer-camera glass-panel overflow-hidden rounded-[28px] p-4"><div className="relative overflow-hidden rounded-2xl bg-black"><video ref={videoRef} muted playsInline className="h-[min(72vh,720px)] min-h-[480px] w-full rounded-2xl bg-black object-contain sm:min-h-[560px]"/>{receiving&&<div className="pointer-events-none absolute inset-0 grid place-items-center"><div className="relative aspect-square w-[72%] max-w-[560px] rounded-[28px] border-2 border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]"><span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/65 px-3 py-1 text-[10px] font-bold text-white">ALIGN QR INSIDE FRAME</span></div></div>}{ackPayload&&<div className="pointer-events-none absolute bottom-3 right-3 rounded-2xl border border-cyan-300/40 bg-white/95 p-2 shadow-2xl"><p className="mb-1 text-center text-[9px] font-black text-slate-950">RETURN ACK</p><canvas ref={ackCanvasRef} className="h-[180px] w-[180px] rounded-lg" aria-label="OptiTransfer receiver acknowledgement QR"/></div>}</div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{if(receiving){setAckPayload('');stopReceive();}else void startReceive();}} className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950">{receiving?'Stop receiver':'Start receiver'}</button><span className="rounded-full bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300">{receiving?'Scanning multi-QR':'Camera idle'}</span>{receiving&&<button onClick={startBenchmark} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-200">{benchmarking?'Benchmarking…':'Benchmark 1 MB'}</button>}</div></div>
