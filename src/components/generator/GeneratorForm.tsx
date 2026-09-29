@@ -15,7 +15,7 @@ export function GeneratorForm() {
   const [multiQr, setMultiQr] = useState('');
   const [multiIndex, setMultiIndex] = useState(1);
   const [multiPlaying, setMultiPlaying] = useState(false);
-  const [multiSpeed, setMultiSpeed] = useState(1000);
+  const [multiInterval, setMultiInterval] = useState(1000);
   const [imageName, setImageName] = useState('');
   const [imagePreview, setImagePreview] = useState('');
   const [imageInfo, setImageInfo] = useState('');
@@ -55,12 +55,12 @@ export function GeneratorForm() {
   useEffect(() => {
     if (!multiPlaying || !multiPlan || multiPlan.total < 2) return;
 
-    const timer = window.setSpeed(() => {
+    const timer = window.setInterval(() => {
       setMultiIndex(current => current >= multiPlan.total ? 1 : current + 1);
-    }, multiSpeed);
+    }, multiInterval);
 
-    return () => window.clearSpeed(timer);
-  }, [multiPlaying, multiPlan, multiSpeed]);
+    return () => window.clearInterval(timer);
+  }, [multiPlaying, multiPlan, multiInterval]);
 
   async function chooseImage(file?: File) {
     if (!file) return;
@@ -85,7 +85,7 @@ export function GeneratorForm() {
         } catch (singleError) {
           // Camera photos are usually too large for one QR. Automatically fall back
           // to lossless Large photo instead of leaving the previous QR visible.
-          if (singleError instanceof Error && singleError.message.includes('Large photo Photo')) {
+          if (singleError instanceof Error && singleError.message.includes('Multi-QR Photo')) {
             const encoded = await encodeImageForMultiQr(file);
             if (operation !== operationRef.current) return;
             const firstChunk = await encoded.getChunk(1);
@@ -154,7 +154,7 @@ export function GeneratorForm() {
             <button type="button" disabled={multiIndex >= multiPlan.total} onClick={() => { setMultiPlaying(false); setMultiIndex(current => Math.min(multiPlan.total, current + 1)); }} className="rounded-full bg-white/10 px-4 py-2 text-xs font-bold disabled:opacity-40">Next</button>
             <label className="inline-flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
               <span>Speed</span>
-              <select value={multiSpeed} onChange={event => setMultiSpeed(Number(event.target.value))} className="rounded-full border border-white/10 bg-black/10 px-3 py-1.5">
+              <select value={multiInterval} onChange={event => setMultiInterval(Number(event.target.value))} className="rounded-full border border-white/10 bg-black/10 px-3 py-1.5">
                 <option value="700">700ms</option>
                 <option value="1000">1 sec</option>
                 <option value="1300">1.3 sec</option>
