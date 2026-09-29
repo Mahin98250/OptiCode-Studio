@@ -460,6 +460,208 @@ export function Transfer() {
     }
   }
 
+  function resetFeedbackState(){
+    feedbackLastAckSeqRef.current=-1;
+    feedbackMissingSetRef.current.clear();
+    feedbackRetryIndexRef.current=null;
+    feedbackRetryRepeatRef.current=0;
+    setFeedbackConnected(false);
+    setFeedbackReceived(0);
+    setFeedbackTotal(0);
+    setFeedbackMissing([]);
+    setFeedbackState(feedbackEnabled ? 'searching' : 'unavailable');
+    setFeedbackLastAt(null);
+  }
+
+  function applyFeedbackAck(value:string){
+    const ack=parseAckPayload(value);
+    const activePlan=compat ?? fountain;
+    if(!ack || !activePlan || ack.sequence<=feedbackLastAckSeqRef.current || ack.session!==activePlan.session) return false;
+
+    feedbackLastAckSeqRef.current=ack.sequence;
+    setFeedbackConnected(true);
+    setFeedbackReceived(ack.received);
+    setFeedbackTotal(ack.total);
+    setFeedbackLastAt(Date.now());
+
+    if(ack.mode==='compatibility' && compat && ack.total===compat.total){
+      const missingSet=feedbackMissingSetRef.current;
+      const missingInWindow=new Set(getAckMissingIndexes(ack));
+      for(let offset=0;offset<ack.windowBits;offset+=1){
+        const index=ack.base+offset;
+        if(missingInWindow.has(index)) missingSet.add(index);
+        else missingSet.delete(index);
+      }
+      const missing=[...missingSet].filter(index=>index>=1 && index<=ack.total).sort((a,b)=>a-b);
+      setFeedbackMissing(missing.slice(0,24));
+      if(ack.state==='complete'){
+        missingSet.clear();
+        setFeedbackMissing([]);
+        setFeedbackState('complete');
+        setPlaying(false);
+        stopFeedbackCamera();
+      }else{
+        setFeedbackState('connected');
+      }
+    }else if(ack.mode==='fountain' && fountain){
+      setFeedbackMissing([]);
+      setFeedbackState(ack.state==='complete' ? 'complete' : 'connected');
+      if(ack.state==='complete'){
+        setPlaying(false);
+        stopFeedbackCamera();
+      }
+    }
+    return true;
+  }
+
+  async function startFeedbackCamera(){
+    if(!feedbackEnabled || feedbackActiveRef.current || !(compat ?? fountain)) return;
+    if(!window.isSecureContext || !navigator.mediaDevices?.getUserMedia){
+      setFeedbackState('unavailable');
+      return;
+    }
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:{ideal:'user'},width:{ideal:1280,max:1920},height:{ideal:720,max:1080},frameRate:{ideal:20,max:30}},
+        audio:false,
+      });
+      feedbackStreamRef.current=stream;
+      feedbackActiveRef.current=true;
+      setFeedbackState('searching');
+
+      const video=feedbackVideoRef.current;
+      if(!video) throw new Error('Feedback camera preview is unavailable.');
+      video.srcObject=stream;
+      await video.play();
+
+      try{
+        const reader=new BrowserQRCodeReader(undefined,{delayBetweenScanAttempts:280,delayBetweenScanSuccess:280}) as unknown as ZxingReader;
+        feedbackReaderRef.current=reader;
+        const controls=await reader.decodeFromVideoElement(video,(result)=>{
+          if(!feedbackActiveRef.current || !result) return;
+          const value=result.getText();
+          if(value) applyFeedbackAck(value);
+        });
+        if(feedbackActiveRef.current){
+          feedbackControlsRef.current=controls;
+          reader.controls=controls;
+          return;
+        }
+        try{controls.stop();}catch{}
+      }catch{
+        feedbackReaderRef.current=null;
+        feedbackControlsRef.current=null;
+      }
+
+      const canvas=feedbackCanvasRef.current ?? document.createElement('canvas');
+      feedbackCanvasRef.current=canvas;
+      const ctx=canvas.getContext('2d',{willReadFrequently:true});
+      if(!ctx) throw new Error('Feedback decoder surface is unavailable.');
+      feedbackPoolRef.current=feedbackPoolRef.current ?? new QrDecodePool(1);
+      const loop=()=>{
+        if(!feedbackActiveRef.current) return;
+        if(!video.videoWidth || video.readyState<2 || !feedbackPoolRef.current){
+          feedbackLoopRef.current=window.setTimeout(loop,350);
+          return;
+        }
+        const max=720;
+        const scale=Math.min(1,max/Math.max(video.videoWidth,video.videoHeight));
+        const width=Math.max(1,Math.round(video.videoWidth*scale));
+        const height=Math.max(1,Math.round(video.videoHeight*scale));
+        canvas.width=width; canvas.height=height;
+        ctx.imageSmoothingEnabled=false;
+        ctx.drawImage(video,0,0,width,height);
+        const image=ctx.getImageData(0,0,width,height);
+        const job=feedbackPoolRef.current.available>=0 ? feedbackPoolRef.current.decode(image.data.buffer,width,height,1) : null;
+        if(job) void job.then(decoded=>{
+          for(const value of decoded.values){
+            if(applyFeedbackAck(value)) break;
+          }
+        }).catch(()=>{});
+        feedbackLoopRef.current=window.setTimeout(loop,350);
+      };
+      loop();
+    }catch{
+      feedbackActiveRef.current=false;
+      feedbackStreamRef.current?.getTracks().forEach(track=>track.stop());
+      feedbackStreamRef.current=null;
+      setFeedbackState('unavailable');
+    }
+  }
+
+  function stopFeedbackCamera(){
+    feedbackActiveRef.current=false;
+    if(feedbackLoopRef.current!==null){
+      window.clearTimeout(feedbackLoopRef.current);
+      feedbackLoopRef.current=null;
+    }
+    try{feedbackControlsRef.current?.stop();}catch{}
+    try{feedbackReaderRef.current?.reset();}catch{}
+    feedbackControlsRef.current=null;
+    feedbackReaderRef.current=null;
+    feedbackStreamRef.current?.getTracks().forEach(track=>track.stop());
+    feedbackStreamRef.current=null;
+    feedbackPoolRef.current?.terminate();
+    feedbackPoolRef.current=null;
+    if(feedbackVideoRef.current) feedbackVideoRef.current.srcObject=null;
+  }
+
+  function publishCompatibilityAck(frame:NonNullable<ReturnType<typeof parseTransferFrame>>,received:number,complete:boolean){
+    if(!frame || !frame.total) return;
+    const requiredBytes=Math.ceil(frame.total/8);
+    if(compatAckSessionRef.current!==frame.session || !compatAckBitmapRef.current || compatAckBitmapRef.current.length!==requiredBytes){
+      compatAckSessionRef.current=frame.session;
+      compatAckBitmapRef.current=new Uint8Array(requiredBytes);
+      compatAckSequenceRef.current=0;
+      compatAckFirstMissingRef.current=1;
+      void getTransferReceivedFrames(frame.session).then(indexes=>{
+        const bitmap=compatAckBitmapRef.current;
+        if(compatAckSessionRef.current!==frame.session || !bitmap) return;
+        for(const index of indexes) setAckBit(bitmap,index,true);
+        while(compatAckFirstMissingRef.current<=frame.total){
+          const index=compatAckFirstMissingRef.current;
+          if(!Boolean(bitmap[(index-1)>>>3] & (1<<((index-1)&7)))) break;
+          compatAckFirstMissingRef.current+=1;
+        }
+        publishCompatibilityAck(frame,received,complete);
+      }).catch(()=>{});
+      return;
+    }
+    setAckBit(compatAckBitmapRef.current,frame.index,true);
+    while(compatAckFirstMissingRef.current<=frame.total){
+      const index=compatAckFirstMissingRef.current;
+      if(!Boolean(compatAckBitmapRef.current[(index-1)>>>3] & (1<<((index-1)&7)))) break;
+      compatAckFirstMissingRef.current+=1;
+    }
+    compatAckSequenceRef.current+=1;
+    setAckPayload(createAckPayload({
+      session:frame.session,
+      mode:'compatibility',
+      total:frame.total,
+      received,
+      firstMissing:Math.min(frame.total,compatAckFirstMissingRef.current),
+      bitmap:compatAckBitmapRef.current,
+      sequence:compatAckSequenceRef.current,
+      state:complete?'complete':'streaming',
+    }));
+  }
+
+  function publishFountainAck(frame:FountainDroplet,solved:number,complete:boolean){
+    const bits=new Uint8Array(Math.ceil(Math.min(64,frame.blocks)/8));
+    bits.fill(0xff);
+    compatAckSequenceRef.current+=1;
+    setAckPayload(createAckPayload({
+      session:frame.session,
+      mode:'fountain',
+      total:frame.blocks,
+      received:solved,
+      firstMissing:1,
+      bitmap:bits,
+      sequence:compatAckSequenceRef.current,
+      state:complete?'complete':'streaming',
+    }));
+  }
+
   function stopPlayback(){
     setPlaying(false);
     playbackGroupRef.current=0;
