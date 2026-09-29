@@ -24,15 +24,23 @@ function drawMatrixToCanvas(
   ctx.fillRect(x, y, size, size);
   ctx.fillStyle = '#000000';
 
+  // Draw contiguous black runs instead of one fillRect per module.
+  // QR rows commonly contain many adjacent dark modules, so run-length
+  // rasterization cuts the number of canvas calls dramatically.
   for (let row = 0; row < matrix.size; row += 1) {
-    for (let col = 0; col < matrix.size; col += 1) {
-      const index = row * matrix.size + col;
-      if (!matrix.data[index]) continue;
-      const left = x + safeMargin + Math.floor(col * cell);
-      const top = y + safeMargin + Math.floor(row * cell);
-      const right = x + safeMargin + Math.floor((col + 1) * cell);
-      const bottom = y + safeMargin + Math.floor((row + 1) * cell);
-      ctx.fillRect(left, top, Math.max(1, right - left), Math.max(1, bottom - top));
+    let runStart = -1;
+    for (let col = 0; col <= matrix.size; col += 1) {
+      const dark = col < matrix.size && Boolean(matrix.data[row * matrix.size + col]);
+      if (dark && runStart < 0) {
+        runStart = col;
+      } else if (!dark && runStart >= 0) {
+        const left = x + safeMargin + Math.floor(runStart * cell);
+        const top = y + safeMargin + Math.floor(row * cell);
+        const right = x + safeMargin + Math.floor(col * cell);
+        const bottom = y + safeMargin + Math.floor((row + 1) * cell);
+        ctx.fillRect(left, top, Math.max(1, right - left), Math.max(1, bottom - top));
+        runStart = -1;
+      }
     }
   }
 }
@@ -58,9 +66,9 @@ export function drawQrMatricesToCanvas(
   size = 900,
   gap = 14,
 ) {
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
+  if (canvas.width !== size) canvas.width = size;
+  if (canvas.height !== size) canvas.height = size;
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
   if (!ctx) throw new Error('Canvas unavailable.');
 
   ctx.fillStyle = '#ffffff';
