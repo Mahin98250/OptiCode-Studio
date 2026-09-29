@@ -183,6 +183,13 @@ export async function getTransferMissingFrames(session:string) {
   return missing;
 }
 
+export async function getTransferReceivedFrames(session:string) {
+  const key=sessionKey(session);
+  const stored=await getSession(key);
+  if (!stored || stored.type !== 'transfer') return [];
+  return getChunkIndexes(key);
+}
+
 export async function clearTransfer(session:string) {
   await clearSession(sessionKey(session));
 }
