@@ -72,7 +72,7 @@ const tools = [
   { to: '/generator', icon: Layers3, eyebrow: 'Create', title: 'Photo → QR + Multi-QR', text: 'Turn a photo into one or several QR codes.', badge: 'Extra' },
   { to: '/scanner', icon: ScanLine, eyebrow: 'Scan', title: 'QR + Barcode Scanner', text: 'Scan QR codes and many common barcodes using the camera or a photo.', badge: 'Main' },
   { to: '/transfer', icon: Zap, eyebrow: 'Transfer', title: 'Optical File Transfer', text: 'Share files from one screen to another device without internet.', badge: 'File sharing' },
-  { to: '/optiframe', icon: Binary, eyebrow: 'Experimental', title: 'OptiFrame Lab', text: 'Try the app's experimental high-speed file-sharing screen.', badge: 'Experimental' },
+  { to: '/optiframe', icon: Binary, eyebrow: 'Experimental', title: 'OptiFrame Lab', text: "Try the app's experimental high-speed file-sharing screen.", badge: 'Experimental' },
   { to: '/tools', icon: ScanBarcode, eyebrow: 'Inspect', title: 'Check a product code', text: 'Check common product numbers and ISBNs.', badge: 'On this device' },
   { to: '/history', icon: HistoryIcon, eyebrow: 'Organize', title: 'Scan Library', text: 'Find, label, favorite, copy, and back up saved scans.', badge: 'On this device' },
   { to: '/statistics', icon: BarChart3, eyebrow: 'Analyze', title: 'Scan Analytics', text: 'See simple totals and your recent scan activity.', badge: 'On this device' },
