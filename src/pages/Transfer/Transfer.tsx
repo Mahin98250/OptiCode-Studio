@@ -695,7 +695,7 @@ export function Transfer() {
     }
     playbackLastAtRef.current=0;
   }
-  function stopReceive(){
+  function stopReceive(preserveAck=false){
     receivingRef.current=false;
     streamRef.current?.getTracks().forEach(t=>t.stop());
     streamRef.current=null;
@@ -716,6 +716,7 @@ export function Transfer() {
     nativeInFlightRef.current=false;
     nativeDetectorRef.current=null;
     setReceiving(false);
+    if(!preserveAck) setAckPayload('');
   }
 
   async function startZxingAssist(){
@@ -978,7 +979,7 @@ export function Transfer() {
           if(benchmarking) await finishBenchmarkRun();
           setResult({url:rebuilt.url,name:rebuilt.name,size:rebuilt.size,mime:rebuilt.mime});
           setProgress(null);
-          stopReceive(true);
+          stopReceive();
         }
       }
       return;
