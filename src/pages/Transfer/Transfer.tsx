@@ -175,13 +175,28 @@ export function Transfer() {
   const ackPublishTimerRef=useRef<number|null>(null);
   const ackPendingPayloadRef=useRef<string|null>(null);
   const ackLastPublishedAtRef=useRef(0);
+  const opticalCanvasSizeRef=useRef(900);
   const resultUrlRef=useRef<string|null>(null);
 
-  function getOpticalCanvasSize(canvas:HTMLCanvasElement){
+  function measureOpticalCanvasSize(canvas:HTMLCanvasElement){
     const cssWidth=Math.max(280,Math.floor(canvas.getBoundingClientRect().width || canvas.clientWidth || window.innerWidth));
     const dpr=Math.min(3,Math.max(1,window.devicePixelRatio||1));
-    return Math.min(1800,Math.max(720,Math.round(cssWidth*dpr)));
+    opticalCanvasSizeRef.current=Math.min(1800,Math.max(720,Math.round(cssWidth*dpr)));
   }
+
+  function getOpticalCanvasSize(){
+    return opticalCanvasSizeRef.current;
+  }
+
+  useEffect(()=>{
+    const canvas=qrCanvasRef.current;
+    if(!canvas)return;
+    measureOpticalCanvasSize(canvas);
+    if(typeof ResizeObserver==='undefined')return;
+    const observer=new ResizeObserver(()=>measureOpticalCanvasSize(canvas));
+    observer.observe(canvas);
+    return()=>observer.disconnect();
+  },[fountain,compat]);
 
   async function enterTransferFullscreen(){
     try{ await qrCanvasRef.current?.requestFullscreen?.(); }catch{}
@@ -286,7 +301,7 @@ export function Transfer() {
             const cacheKey=planKey+':'+nextGroup;
             const cached=renderCacheRef.current.get(cacheKey);
             if(cached) {
-              drawQrMatricesToCanvas(qrCanvasRef.current,cached.matrices,getOpticalCanvasSize(qrCanvasRef.current),18);
+              drawQrMatricesToCanvas(qrCanvasRef.current,cached.matrices,getOpticalCanvasSize(),18);
               if(fountainMode){
                 playbackGroupRef.current+=1;
               }else if(retryIndex!==null){
@@ -412,7 +427,7 @@ export function Transfer() {
         if(cancelled || epoch!==renderEpochRef.current)return;
         if(display){
           renderCountRef.current+=1;
-          if(qrCanvasRef.current && !playing) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,getOpticalCanvasSize(qrCanvasRef.current),18);
+          if(qrCanvasRef.current && !playing) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,getOpticalCanvasSize(),18);
           const now=performance.now();
           if(renderWindowStatsRef.current.started===0)renderWindowStatsRef.current.started=now;
           renderWindowStatsRef.current.count+=1;
@@ -494,7 +509,7 @@ export function Transfer() {
     try{
       const entry=await buildRenderGroup(planKey,plan,0,fountainMode);
       if(playbackPlanKeyRef.current!==planKey) return;
-      if(qrCanvasRef.current) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,getOpticalCanvasSize(qrCanvasRef.current),18);
+      if(qrCanvasRef.current) drawQrMatricesToCanvas(qrCanvasRef.current,entry.matrices,getOpticalCanvasSize(),18);
       playbackRepeatRef.current=0;
       setPlaying(true);
     }catch(error){
