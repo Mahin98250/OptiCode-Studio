@@ -17,20 +17,6 @@
     <title>OptiCode Studio — QR · Barcode · Optical Transfer</title>
   </head>
   <body>
-    <script>
-      // Recover users from stale pre-v2 PWA caches without requiring manual browser settings.
-      (() => {
-        const RESET_KEY = 'opticode-studio-cache-reset-v4';
-        if ('serviceWorker' in navigator && navigator.serviceWorker.controller && localStorage.getItem(RESET_KEY) !== '1') {
-          localStorage.setItem(RESET_KEY, '1');
-          navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
-            .then(() => caches.keys())
-            .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
-            .then(() => location.reload())
-            .catch(() => location.reload());
-        }
-      })();
-    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
