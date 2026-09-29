@@ -21,7 +21,7 @@ type CameraStats = {
   captureFps: number;
   decodeFps: number;
   goodputBps: number;
-  lastReading confidence: number;
+  lastConfidence: number;
   cameraWidth: number;
   cameraHeight: number;
   cameraFrameRate: number;
@@ -51,7 +51,7 @@ type AcquisitionTestState = {
   running: boolean;
   samples: number;
   locks: number;
-  totalCorners found: number;
+  totalCorners: number;
   averageMs: number;
   peakMs: number;
   lastStage: OptiFrameAcquisitionDiagnostics['stage'];
@@ -76,7 +76,7 @@ function emptyAcquisitionTest(): AcquisitionTestState {
     running: false,
     samples: 0,
     locks: 0,
-    totalCorners found: 0,
+    totalCorners: 0,
     averageMs: 0,
     peakMs: 0,
     lastStage: 'image',
@@ -95,7 +95,7 @@ export function OptiFrameLab() {
   const [cameraError, setCameraError] = useState('');
   const [cameraDecoded, setCameraDecoded] = useState('');
   const [receiver, setReceiver] = useState({ total: 0, received: 0, bytes: 0, missing: [] as number[], complete: false });
-  const [cameraStats, setCameraStats] = useState<CameraStats>({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastReading confidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: null });
+  const [cameraStats, setCameraStats] = useState<CameraStats>({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: null });
   const [acquisition, setAcquisition] = useState<OptiFrameAcquisitionDiagnostics>({ stage: 'image', anchors: [], confidence: 0, moduleScale: 0, angle: 0, geometryRatio: 0, sampleWidth: 0, sampleHeight: 0, elapsedMs: 0 });
   const [cameraCapabilities, setCameraCapabilities] = useState<string[]>([]);
   const [acquisitionTest, setAcquisitionTest] = useState<AcquisitionTestState>(emptyAcquisitionTest);
@@ -120,7 +120,7 @@ export function OptiFrameLab() {
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const presentationCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const seenSequenceRef = useRef(new Set<number>());
-  const trackedCorners foundRef = useRef<OptiFramePerspectiveDiagnostics['anchors'] | null>(null);
+  const trackedAnchorsRef = useRef<OptiFramePerspectiveDiagnostics['anchors'] | null>(null);
   const framesSinceFullScanRef = useRef(0);
   const acquisitionFailureRef = useRef(0);
   const acquisitionTestRef = useRef(false);
@@ -369,7 +369,7 @@ export function OptiFrameLab() {
         running: samples < ACQUISITION_TEST_SAMPLES,
         samples,
         locks,
-        totalCorners found: previous.totalCorners found + probe.anchors.length,
+        totalCorners: previous.totalCorners + probe.anchors.length,
         averageMs: ((previous.averageMs * previous.samples) + elapsed) / samples,
         peakMs: Math.max(previous.peakMs, elapsed),
         lastStage: probe.stage,
@@ -384,7 +384,7 @@ export function OptiFrameLab() {
           'Camera test complete · ' +
           Math.round((locks / samples) * 100) +
           '% full-lock rate · ' +
-          Math.round((next.totalCorners found / samples) * 10) / 10 +
+          Math.round((next.totalCorners / samples) * 10) / 10 +
           ' anchors/sample · ' +
           next.averageMs.toFixed(0) +
           ' ms mean',
@@ -396,7 +396,7 @@ export function OptiFrameLab() {
     }
 
     const cropTrackedRegion = (source: ImageData) => {
-      const anchors = trackedCorners foundRef.current;
+      const anchors = trackedAnchorsRef.current;
       if (!anchors) return null;
       const minX = Math.min(...anchors.map(anchor => anchor.x));
       const maxX = Math.max(...anchors.map(anchor => anchor.x));
@@ -549,7 +549,7 @@ export function OptiFrameLab() {
         decodeFps: elapsedFromStart ? (prev.hits + successes.length) / elapsedFromStart : 0,
         bytes: assembly.bytes,
         goodputBps: elapsedFromStart ? assembly.bytes / elapsedFromStart : 0,
-        lastReading confidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
+        lastConfidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
       }));
 
       setReceiver({
@@ -594,18 +594,18 @@ export function OptiFrameLab() {
     if (result) {
       framesSinceFullScanRef.current = usedFullScan ? 0 : framesSinceFullScanRef.current + 1;
       acquisitionFailureRef.current = 0;
-      const absoluteCorners found = result.diagnostics.anchors.map(anchor => ({
+      const absoluteAnchors = result.diagnostics.anchors.map(anchor => ({
         ...anchor,
         x: anchor.x + cropOffset.x,
         y: anchor.y + cropOffset.y,
       })) as OptiFramePerspectiveDiagnostics['anchors'];
-      trackedCorners foundRef.current = absoluteCorners found;
+      trackedAnchorsRef.current = absoluteAnchors;
       setAcquisition({
         stage: 'ready',
-        anchors: absoluteCorners found,
+        anchors: absoluteAnchors,
         confidence: result.diagnostics.confidence,
-        moduleScale: absoluteCorners found.reduce((sum, anchor) => sum + anchor.scale, 0) / absoluteCorners found.length,
-        angle: absoluteCorners found.reduce((sum, anchor) => sum + anchor.angle, 0) / absoluteCorners found.length,
+        moduleScale: absoluteAnchors.reduce((sum, anchor) => sum + anchor.scale, 0) / absoluteAnchors.length,
+        angle: absoluteAnchors.reduce((sum, anchor) => sum + anchor.angle, 0) / absoluteAnchors.length,
         geometryRatio: 0,
         sampleWidth: image.width,
         sampleHeight: image.height,
@@ -636,7 +636,7 @@ export function OptiFrameLab() {
         dropped: prev.dropped + (dropped ? 1 : 0),
         captureFps: elapsedFromStart ? (prev.attempts + 1) / elapsedFromStart : 0,
         decodeFps: elapsedFromStart ? nextHits / elapsedFromStart : 0,
-        lastReading confidence: result ? result.diagnostics.confidence : prev.lastReading confidence,
+        lastConfidence: result ? result.diagnostics.confidence : prev.lastConfidence,
       };
     });
 
@@ -695,7 +695,7 @@ export function OptiFrameLab() {
     setCameraError('');
     assemblerRef.current.reset();
     seenSequenceRef.current.clear();
-    trackedCorners foundRef.current = null;
+    trackedAnchorsRef.current = null;
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
     setCameraDecoded('');
@@ -704,7 +704,7 @@ export function OptiFrameLab() {
     acquisitionTestRef.current = false;
     acquisitionTestMetricsRef.current = emptyAcquisitionTest();
     setAcquisitionTest(emptyAcquisitionTest());
-    setCameraStats({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastReading confidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: performance.now() });
+    setCameraStats({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: performance.now() });
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -807,7 +807,7 @@ export function OptiFrameLab() {
   function resetReceiver() {
     assemblerRef.current.reset();
     seenSequenceRef.current.clear();
-    trackedCorners foundRef.current = null;
+    trackedAnchorsRef.current = null;
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
     setCameraDecoded('');
@@ -815,7 +815,7 @@ export function OptiFrameLab() {
     if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
     receivedFileUrlRef.current = '';
     setReceivedFileUrl('');
-    setCameraStats(prev => ({ ...prev, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastReading confidence: 0 }));
+    setCameraStats(prev => ({ ...prev, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0 }));
   }
 
   return (
@@ -988,7 +988,7 @@ export function OptiFrameLab() {
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div><p className="text-[10px] text-[var(--text-muted)]">Samples</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples}/{ACQUISITION_TEST_SAMPLES}</p></div>
               <div><p className="text-[10px] text-[var(--text-muted)]">Good reads</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? Math.round(acquisitionTest.locks / acquisitionTest.samples * 100) + '%' : '—'}</p></div>
-              <div><p className="text-[10px] text-[var(--text-muted)]">Average corners</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? (acquisitionTest.totalCorners found / acquisitionTest.samples).toFixed(1) : '—'}</p></div>
+              <div><p className="text-[10px] text-[var(--text-muted)]">Average corners</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? (acquisitionTest.totalCorners / acquisitionTest.samples).toFixed(1) : '—'}</p></div>
               <div><p className="text-[10px] text-[var(--text-muted)]">Average / fastest</p><p className="text-sm font-black text-[var(--text)]">{acquisitionTest.samples ? acquisitionTest.averageMs.toFixed(0) + ' / ' + acquisitionTest.peakMs.toFixed(0) + ' ms' : '—'}</p></div>
             </div>
 
@@ -1010,7 +1010,7 @@ export function OptiFrameLab() {
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Goodput</p><p className="mt-1 text-lg font-black text-[var(--text)]">{(cameraStats.goodputBps / 1024).toFixed(1)} KB/s</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Workers</p><p className="mt-1 text-lg font-black text-[var(--text)]">{decodePoolRef.current.busyCount}/{decodePoolRef.current.capacity}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Decode FPS</p><p className="mt-1 text-lg font-black text-[var(--text)]">{cameraStats.decodeFps.toFixed(1)}</p></div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Anchor confidence</p><p className="mt-1 text-lg font-black text-[var(--text)]">{Math.round(cameraStats.lastReading confidence * 100)}%</p></div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Anchor confidence</p><p className="mt-1 text-lg font-black text-[var(--text)]">{Math.round(cameraStats.lastConfidence * 100)}%</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Camera</p><p className="mt-1 text-sm font-black text-[var(--text)]">{cameraStats.cameraWidth && cameraStats.cameraHeight ? `${cameraStats.cameraWidth}×${cameraStats.cameraHeight}` : '—'}</p></div>
           </div>
         </GlassCard>
