@@ -49,7 +49,7 @@ export function History() {
     }
   }
 
-  function downloadBackup() {
+  function downloadSave backup() {
     const blob = new Blob([exportHistory()], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -75,12 +75,12 @@ export function History() {
     <section className="history-page mx-auto max-w-5xl py-8 sm:py-10">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-[var(--text)] sm:text-5xl">Scan Library</h1>
-          <p className="mt-3 text-sm leading-7 text-[var(--text-muted)] sm:text-base">Your local QR and barcode history, searchable and portable.</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-[var(--text)] sm:text-5xl">Saved scans</h1>
+          <p className="mt-3 text-sm leading-7 text-[var(--text-muted)] sm:text-base">Find your saved QR codes and barcodes, copy them, open them, or organize them.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <GlassButton type="button" onClick={downloadBackup}><Download size={14} /> Backup</GlassButton>
-          <GlassButton type="button" onClick={() => inputRef.current?.click()}><Upload size={14} /> Restore</GlassButton>
+          <GlassButton type="button" onClick={downloadSave backup}><Download size={14} /> Save backup</GlassButton>
+          <GlassButton type="button" onClick={() => inputRef.current?.click()}><Upload size={14} /> Restore backup</GlassButton>
           <input ref={inputRef} type="file" accept="application/json,.json" className="sr-only" onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) void handleImport(file);
@@ -94,7 +94,7 @@ export function History() {
           ['Scans', stats.total],
           ['QR', stats.qr],
           ['Barcodes', stats.barcodes],
-          ['Favorites', stats.favorites],
+          ['Starred', stats.favorites],
         ].map(([label, value]) => (
           <div key={String(label)} className="glass-soft rounded-[22px] p-4">
             <p className="text-[10px] font-bold uppercase tracking-[.15em] text-[var(--text-muted)]">{String(label)}</p>
@@ -107,12 +107,12 @@ export function History() {
         <div className="flex flex-col gap-3">
           <label className="relative">
             <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search URLs, contacts, products, UPI, text…" className="w-full rounded-full border border-[var(--border)] bg-[var(--bg-soft)] py-3 pl-11 pr-4 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search saved scans…" className="w-full rounded-full border border-[var(--border)] bg-[var(--bg-soft)] py-3 pl-11 pr-4 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
           </label>
           <div className="flex flex-wrap items-center gap-2">
             {([
               ['all', 'All'],
-              ['favorites', 'Favorites'],
+              ['favorites', 'Starred'],
               ['qr', 'QR'],
               ['barcode', 'Barcodes'],
             ] as const).map(([value, label]) => (
@@ -129,7 +129,7 @@ export function History() {
         <div className="mt-5 space-y-3">
           {filtered.length === 0 ? (
             <div className="rounded-[22px] border border-dashed border-[var(--border)] bg-[var(--bg-soft)] px-5 py-12 text-center text-sm text-[var(--text-muted)]">
-              No matching scans yet.
+              No saved scans match your search.
             </div>
           ) : filtered.map((item) => {
             const analysis = analyzeScan(item.value, item.format || '');
@@ -154,7 +154,7 @@ export function History() {
                   {item.favorite && <Heart size={15} className="mt-1 shrink-0 fill-current text-pink-400" />}
                 </div>
                 <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]"><Tag size={12} /> Tags</label>
+                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.14em] text-[var(--text-muted)]"><Tag size={12} /> Labels</label>
                   <input
                     value={tagInputs[item.id] ?? (item.tags || []).join(', ')}
                     onChange={(event) => setTagInputs((current) => ({ ...current, [item.id]: event.target.value }))}
@@ -179,15 +179,15 @@ export function History() {
 
         {items.length > 0 && (
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-5">
-            <p className="text-xs text-[var(--text-muted)]">Backups are plain JSON and contain only this browser's library.</p>
-            <GlassButton type="button" onClick={() => { clearHistory(); setItems([]); setNotice('Library cleared from this device.'); }}><Trash2 size={14} /> Clear all</GlassButton>
+            <p className="text-xs text-[var(--text-muted)]">Save backups are plain JSON and contain only this browser's library.</p>
+            <GlassButton type="button" onClick={() => { clearHistory(); setItems([]); setNotice('Library cleared from this device.'); }}><Trash2 size={14} /> Delete all</GlassButton>
           </div>
         )}
       </GlassCard>
 
       <div className="mt-5 flex items-center gap-2 rounded-[22px] border border-[var(--border)] bg-[var(--bg-soft)] px-4 py-3 text-xs text-[var(--text-muted)]">
         <Import size={15} className="shrink-0 text-cyan-300" />
-        Tip: use Backup before changing devices, then Restore on the new device. Your library stays local unless you explicitly export it.
+        Tip: use Save backup before changing devices, then Restore backup on the new device. Your library stays local unless you explicitly export it.
       </div>
     </section>
   );
