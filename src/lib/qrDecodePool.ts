@@ -1,4 +1,4 @@
-type DecodeResult={id:number;values:string[];regionsScanned:number;processingMs:number};
+type DecodeResult={id:number;values:string[];boxes:Array<{x:number;y:number;width:number;height:number}>;regionsScanned:number;processingMs:number};
 
 type Pending={
   workerIndex:number;
