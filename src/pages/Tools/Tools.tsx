@@ -68,16 +68,16 @@ function detect(input: string): Detected {
 }
 
 const tools = [
-  { to: '/generator', icon: QrCode, eyebrow: 'Create', title: 'QR Code Generator', text: 'Create QR codes from text and links, tune size/ECC, and export PNG, SVG or JPEG.', badge: 'Core' },
-  { to: '/generator', icon: Layers3, eyebrow: 'Create', title: 'Photo → QR + Multi-QR', text: 'Encode a photo into one QR when it fits or split the original bytes across lossless Multi-QR frames.', badge: 'Advanced' },
-  { to: '/scanner', icon: ScanLine, eyebrow: 'Scan', title: 'QR + Barcode Scanner', text: 'Use the camera or images for QR, EAN, UPC, Code 128/39, Data Matrix, PDF417 and more.', badge: 'Core' },
-  { to: '/transfer', icon: Zap, eyebrow: 'Transfer', title: 'Optical File Transfer', text: 'Send files screen-to-camera with four QR lanes, fountain recovery and an on-device benchmark.', badge: 'OR Transfer 2.0' },
-  { to: '/optiframe', icon: Binary, eyebrow: 'Experimental', title: 'OptiFrame Lab', text: 'Test a custom 2-bit optical symbol surface beyond QR with metadata and CRC-32.', badge: 'Phase 2' },
-  { to: '/tools', icon: ScanBarcode, eyebrow: 'Inspect', title: 'Check a product code', text: 'Normalize UPC/EAN/ISBN values and verify check digits locally without a product database.', badge: 'Local' },
-  { to: '/history', icon: HistoryIcon, eyebrow: 'Organize', title: 'Scan Library', text: 'Search, tag, favorite, copy, open and back up your local scan history.', badge: 'Private' },
-  { to: '/statistics', icon: BarChart3, eyebrow: 'Analyze', title: 'Scan Analytics', text: 'See scan totals, barcode/QR mix, favorites, activity and tag collections.', badge: 'Private' },
-  { to: '/settings', icon: Database, eyebrow: 'Manage', title: 'Backup & Restore', text: 'Export your local library as JSON and restore it on another device.', badge: 'Portable' },
-  { to: '/settings', icon: MoonStar, eyebrow: 'Personalize', title: 'Theme & Privacy', text: 'Switch light/dark/system appearance and review the local-only data model.', badge: 'Device' },
+  { to: '/generator', icon: QrCode, eyebrow: 'Create', title: 'QR Code Generator', text: 'Create QR codes from text and links, then save them as images.', badge: 'Main' },
+  { to: '/generator', icon: Layers3, eyebrow: 'Create', title: 'Photo → QR + Multi-QR', text: 'Turn a photo into one or several QR codes.', badge: 'Extra' },
+  { to: '/scanner', icon: ScanLine, eyebrow: 'Scan', title: 'QR + Barcode Scanner', text: 'Scan QR codes and many common barcodes using the camera or a photo.', badge: 'Main' },
+  { to: '/transfer', icon: Zap, eyebrow: 'Transfer', title: 'Optical File Transfer', text: 'Share files from one screen to another device without internet.', badge: 'File sharing' },
+  { to: '/optiframe', icon: Binary, eyebrow: 'Experimental', title: 'OptiFrame Lab', text: 'Try the app's experimental high-speed file-sharing screen.', badge: 'Experimental' },
+  { to: '/tools', icon: ScanBarcode, eyebrow: 'Inspect', title: 'Check a product code', text: 'Check common product numbers and ISBNs.', badge: 'On this device' },
+  { to: '/history', icon: HistoryIcon, eyebrow: 'Organize', title: 'Scan Library', text: 'Find, label, favorite, copy, and back up saved scans.', badge: 'On this device' },
+  { to: '/statistics', icon: BarChart3, eyebrow: 'Analyze', title: 'Scan Analytics', text: 'See simple totals and your recent scan activity.', badge: 'On this device' },
+  { to: '/settings', icon: Database, eyebrow: 'Manage', title: 'Backup & Restore', text: 'Save your scans to a backup file and restore them later.', badge: 'Backup' },
+  { to: '/settings', icon: MoonStar, eyebrow: 'Personalize', title: 'Theme & Privacy', text: 'Change the look of the app and review your privacy settings.', badge: 'On this device' },
 ];
 
 export function Tools() {
@@ -250,7 +250,7 @@ export function Tools() {
             <div className="flex items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-violet-300/10 text-violet-300"><FlaskConical size={18} /></span>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-violet-300">Advanced tools</p>
+                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-violet-300">Extra tools</p>
                 <h2 className="mt-1 text-xl font-black text-[var(--text)]">System check</h2>
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">This checks that the file-sharing system is working correctly. Most users do not need to use this.</p>
               </div>
