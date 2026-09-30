@@ -1120,8 +1120,8 @@ export function Transfer() {
 
     // Lighting still matters after detection. A decoded frame can be readable
     // but too marginal for stable high-rate reception.
-    setOpticalGuideDiagnostics({framing:'good',distance:size<.22?'too-far':size>.72?'too-close':'good',lighting:'dark',stability:movement>.055?'moving':'steady'});
     if(brightness<42){
+      setOpticalGuideDiagnostics({framing:'good',distance:size<.22?'too-far':size>.72?'too-close':'good',lighting:'dark',stability:movement>.055?'moving':'steady'});
       setOpticalGuide({
         tone:'light',
         title:'A little more light',
@@ -1131,8 +1131,8 @@ export function Transfer() {
       return;
     }
 
-    setOpticalGuideDiagnostics({framing:'good',distance:size<.22?'too-far':size>.72?'too-close':'good',lighting:'glare',stability:movement>.055?'moving':'steady'});
     if(clippedHighlights>0.24 && contrast<48){
+      setOpticalGuideDiagnostics({framing:'good',distance:size<.22?'too-far':size>.72?'too-close':'good',lighting:'glare',stability:movement>.055?'moving':'steady'});
       setOpticalGuide({
         tone:'light',
         title:'Reduce screen glare',
@@ -1142,8 +1142,8 @@ export function Transfer() {
       return;
     }
 
-    setOpticalGuideDiagnostics({framing:'off',distance:size<.22?'too-far':size>.72?'too-close':'good',lighting:'good',stability:movement>.055?'moving':'steady'});
     if(!centered){
+      setOpticalGuideDiagnostics({framing:'off',distance:size<.22?'too-far':size>.72?'too-close':'good',lighting:'good',stability:movement>.055?'moving':'steady'});
       const horizontal=Math.abs(cx-.5);
       const vertical=Math.abs(cy-.5);
       let title='';
@@ -1158,8 +1158,8 @@ export function Transfer() {
       return;
     }
 
-    setOpticalGuideDiagnostics({framing:'good',distance:'too-far',lighting:'good',stability:movement>.055?'moving':'steady'});
     if(size<.22){
+      setOpticalGuideDiagnostics({framing:'good',distance:'too-far',lighting:'good',stability:movement>.055?'moving':'steady'});
       setOpticalGuide({
         tone:'closer',
         title:'Move closer',
@@ -1171,8 +1171,8 @@ export function Transfer() {
       return;
     }
 
-    setOpticalGuideDiagnostics({framing:'good',distance:'too-close',lighting:'good',stability:movement>.055?'moving':'steady'});
     if(size>.72){
+      setOpticalGuideDiagnostics({framing:'good',distance:'too-close',lighting:'good',stability:movement>.055?'moving':'steady'});
       setOpticalGuide({
         tone:'farther',
         title:'Move slightly farther away',
