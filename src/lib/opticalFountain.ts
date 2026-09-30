@@ -391,10 +391,15 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
     const normalizedGroup = Math.max(0, Math.floor(group));
     const slot = normalizedGroup * activeLanes + normalizedLane;
 
-    // Repeat the compact metadata packet periodically so a receiver can join
-    // an already-running stream and still learn filename/type/hash without a
-    // separate control handshake.
-    if (normalizedLane === 0 && normalizedGroup % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0) {
+    // Publish metadata during the coded tail instead of replacing a
+    // systematic source block. That preserves the full source pass while still
+    // giving late receivers a periodic way to learn filename/type/hash.
+    const firstCodedGroup = Math.floor(totalBlocks / activeLanes);
+    if (
+      normalizedLane === 0 &&
+      slot >= totalBlocks &&
+      (normalizedGroup - firstCodedGroup) % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0
+    ) {
       return createMetaPacket(sessionBytes, file.size, totalBlocks, OPTICAL_FOUNTAIN_BLOCK_BYTES, digest, nameBytes, mimeBytes);
     }
 
