@@ -8,6 +8,7 @@ const FINDER_OFFSET = 4;
 const LUMINANCE_LEVELS = [0, 85, 170, 255] as const;
 const DENSE4_LUMINANCE_LEVELS = Array.from({ length: 16 }, (_, index) => Math.round(index * 255 / 15));
 const DENSE4_VERSION = 3;
+const DENSE4_SYMBOL_BITS = 4;
 export type OptiFrameDensity = 2 | 4;
 
 export type OptiFrame = {
