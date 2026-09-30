@@ -73,7 +73,7 @@ function getDisplayLaneCount() {
 
 export function Transfer() {
   const [tab,setTab]=useState<'send'|'receive'>('send');
-  const [mode,setMode]=useState<'fountain'|'compatibility'>('compatibility');
+  const [mode,setMode]=useState<'fountain'|'compatibility'>('fountain');
   const [transferDensity,setTransferDensity]=useState<'legacy'|'dense'>('dense');
   const [file,setFile]=useState<File|null>(null);
   const [fountain,setFountain]=useState<FountainPlan|null>(null);
@@ -82,7 +82,7 @@ export function Transfer() {
   const [playing,setPlaying]=useState(false);
   // Reliability-first physical MVP: each compatibility QR is displayed long
   // enough for a slow camera to acquire it, and compatibility playback repeats it.
-  const [intervalMs,setIntervalMs]=useState(500);
+  const [intervalMs,setIntervalMs]=useState(90);
   // Protect the final compatibility frame with an explicit acquisition tail.
   const FINAL_FRAME_EXTRA_DWELLS=3;
   const [error,setError]=useState('');
@@ -296,7 +296,8 @@ export function Transfer() {
           const fountainMode=playbackFountainRef.current;
           const plan=fountainMode ? fountain : compat;
           if(plan && qrCanvasRef.current){
-            const grid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
+            const displayLanes=getDisplayLaneCount();
+    const grid=displayLanes === 1 ? 1 : displayLanes === 2 ? 2 : 4;
             const totalGroups=fountainMode
               ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/grid))
               : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/grid));
@@ -309,7 +310,7 @@ export function Transfer() {
               }
             }
             const retryIndex=!fountainMode && feedbackEnabled && feedbackConnected ? feedbackRetryIndexRef.current : null;
-            const nextGroup=retryIndex!==null ? retryIndex-1 : (fountainMode ? playbackGroupRef.current : playbackGroupRef.current % totalGroups);
+            const nextGroup=retryIndex!==null ? Math.floor((retryIndex-1)/grid) : (fountainMode ? playbackGroupRef.current : playbackGroupRef.current % totalGroups);
             const cacheKey=planKey+':'+nextGroup;
             const cached=renderCacheRef.current.get(cacheKey);
             if(cached) {
@@ -457,18 +458,18 @@ export function Transfer() {
                 const gaps=feedbackMissingSetRef.current.size;
                 if(gaps>0 || ackAge>1400){
                   if(intervalMs<1300)setIntervalMs(v=>Math.min(1300,v+50));
-                }else if(ackAge<900 && avgRender<16 && fps>30 && intervalMs>300){
-                  setIntervalMs(v=>Math.max(300,v-25));
+                }else if(ackAge<900 && avgRender<22 && fps>18 && intervalMs>60){
+                  setIntervalMs(v=>Math.max(60,v-10));
                 }
               }else if(fountainMode){
-                if(avgRender<9 && fps>45 && intervalMs>120)setIntervalMs(v=>Math.max(120,v-10));
-                else if(avgRender>42 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+25));
+                if(avgRender<14 && fps>18 && intervalMs>60)setIntervalMs(v=>Math.max(60,v-5));
+                else if(avgRender>55 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+20));
               }
             }
             renderWindowStatsRef.current={started:now,count:0,renderMs:0};
           }
 
-          const displayGrid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
+          const displayGrid=getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : 4;
           const totalGroupsForUi=fountainMode
             ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/displayGrid))
             : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/displayGrid));
@@ -608,7 +609,7 @@ export function Transfer() {
       await video.play();
 
       try{
-        const reader=new BrowserQRCodeReader(undefined,{delayBetweenScanAttempts:280,delayBetweenScanSuccess:280}) as unknown as ZxingReader;
+        const reader=new BrowserQRCodeReader(undefined,{delayBetweenScanAttempts:70,delayBetweenScanSuccess:70}) as unknown as ZxingReader;
         feedbackReaderRef.current=reader;
         const controls=await reader.decodeFromVideoElement(video,(result)=>{
           if(!feedbackActiveRef.current || !result) return;
@@ -816,7 +817,7 @@ export function Transfer() {
   async function startZxingAssist(){
     if(!receivingRef.current || !videoRef.current)return false;
     try{
-      const reader=new BrowserQRCodeReader(undefined,{delayBetweenScanAttempts:350,delayBetweenScanSuccess:350}) as unknown as ZxingReader;
+      const reader=new BrowserQRCodeReader(undefined,{delayBetweenScanAttempts:90,delayBetweenScanSuccess:90}) as unknown as ZxingReader;
       zxingReaderRef.current=reader;
       zxingActiveRef.current=true;
       zxingCallsRef.current=0;
@@ -916,7 +917,7 @@ export function Transfer() {
       }
 
       if(receivingRef.current && nativeActiveRef.current){
-        nativeLoopRef.current=window.setTimeout(()=>void loop(),220);
+        nativeLoopRef.current=window.setTimeout(()=>void loop(),45);
       }
     };
 
@@ -1340,7 +1341,7 @@ export function Transfer() {
         }
         // Keep the normal acquisition job to ONE jsQR pass. Quadrant recovery
         // is a last-resort mode after sustained misses, not the default path.
-        const decodeDepth=misses>=12 || cameraFramesRef.current%10===0 ? 1 : 0;
+        const decodeDepth=misses>=8 || cameraFramesRef.current%6===0 ? 1 : 0;
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth);
         if(job){
           decoderCallsRef.current+=1;
@@ -1398,8 +1399,8 @@ export function Transfer() {
               :decoded.processingMs>75
                 ?Math.min(60,Math.max(35,Math.round(decoded.processingMs*.32)))
                 :decoded.values.length>0
-                  ?Math.max(28,scanDelayRef.current-3)
-                  :Math.min(60,scanDelayRef.current+2);
+                  ?Math.max(16,scanDelayRef.current-4)
+                  :Math.min(50,scanDelayRef.current+2);
           }).catch(e=>{
             if(receivingRef.current)setError(e instanceof Error?e.message:'QR decoder worker failed.');
           });
@@ -1409,7 +1410,7 @@ export function Transfer() {
       if(receivingRef.current && fallbackActiveRef.current){
         // 30–60 ms capture cadence gives the camera
         // several acquisition opportunities during each displayed QR interval.
-        fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(30,Math.min(60,scanDelayRef.current)));
+        fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(16,Math.min(50,scanDelayRef.current)));
       }
     };
     void loop();
@@ -1530,7 +1531,7 @@ export function Transfer() {
           <button onClick={()=>{stopPlayback();setMode('compatibility');setFountain(null);setCompat(null);setFile(null);}} className={`rounded-xl px-3 py-3 text-xs font-bold ${mode==='compatibility'?'bg-white text-slate-950':'text-[var(--text-muted)]'}`}>Simple sharing</button>
         </div>
         <input ref={inputRef} type="file" className="sr-only" onChange={e=>{void choose(e.target.files?.[0]);e.currentTarget.value='';}}/>
-        <button onClick={()=>inputRef.current?.click()} className="mt-4 w-full rounded-[24px] border border-dashed border-cyan-300/30 bg-cyan-300/[.05] p-8 text-center"><FileUp className="mx-auto text-cyan-300" size={30}/><p className="mt-3 font-bold">Choose any file</p><p className="mt-1 text-xs text-[var(--text-muted)]">{mode==='fountain'?'Up to 64 MB · extra recovery':'Up to 100 MB · simple recovery'}</p></button>
+        <button onClick={()=>inputRef.current?.click()} className="mt-4 w-full rounded-[24px] border border-dashed border-cyan-300/30 bg-cyan-300/[.05] p-8 text-center"><FileUp className="mx-auto text-cyan-300" size={30}/><p className="mt-3 font-bold">Choose any file</p><p className="mt-1 text-xs text-[var(--text-muted)]">{mode==='fountain'?'Up to 512 MB · faster sharing':'Up to 512 MB · simple recovery'}</p></button>
         <button onClick={()=>{const bytes=new Uint8Array(1024*1024);for(let i=0;i<bytes.length;i+=1)bytes[i]=(i*73+(i%251)*29+(i>>>8))&255;void choose(new File([bytes],'opticode-1mb-benchmark.bin',{type:'application/octet-stream'}));}} className="mt-3 w-full rounded-2xl border border-cyan-300/15 bg-white/5 p-3 text-left"><p className="text-xs font-black text-cyan-200">Sharing speed test</p><p className="mt-1 text-[10px] leading-5 text-[var(--text-muted)]">A small test file to check how quickly your devices can share a file.</p></button>
         {file&&<div className="mt-4 rounded-2xl bg-white/5 p-4"><p className="truncate font-bold">{file.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{(file.size/1024/1024).toFixed(2)} MB · {mode==='fountain'?`${fountain?.blocks.toLocaleString()} source blocks`:`${compat?.total.toLocaleString()} QR frames · ${compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME} bytes/frame`}</p></div>}
         {mode==='compatibility'&&<label className="mt-3 block rounded-2xl bg-white/5 p-3 text-xs font-bold">Simple sharing density<select value={transferDensity} onChange={e=>{const next=e.target.value as 'legacy'|'dense';setTransferDensity(next);if(file){void choose(file,next);}}} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="dense">Faster</option><option value="legacy">More reliable</option></select><p className="mt-1 text-[10px] leading-4 font-normal text-[var(--text-muted)]">Choose Faster for speed or More reliable if the camera has trouble reading the code.</p></label>}
