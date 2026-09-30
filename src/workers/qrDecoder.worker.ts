@@ -1,7 +1,17 @@
 import jsQR from 'jsqr';
 import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
 
-const zxingWarmup=prepareZXingModule({fireImmediately:true}).then(()=>true).catch(()=>false);
+const localWasmUrl = new URL(
+  `${import.meta.env.BASE_URL}zxing_reader.wasm`,
+  self.location.origin,
+).toString();
+
+const zxingWarmup=prepareZXingModule({
+  overrides:{
+    locateFile:(path,prefix)=>path.endsWith('.wasm') ? localWasmUrl : prefix+path,
+  },
+  fireImmediately:true,
+}).then(()=>true).catch(()=>false);
 
 type DecodeRequest = {
   id:number;
