@@ -474,7 +474,9 @@ export class OpticalFountainDecoder {
   add(frame: OpticalFountainFrame) {
     if (frame.kind === 'meta') {
       if (frame.size > OPTICAL_FOUNTAIN_MAX_FILE_SIZE) throw new Error('Optical fountain file is too large.');
-      if (this.meta && this.meta.session !== frame.session) return { duplicate: false, metaConflict: true };
+      if (this.meta && this.meta.session !== frame.session) {
+        return { ...this.snapshot(false), metaConflict: true };
+      }
       this.meta = frame;
       this.totalBlocks = frame.totalBlocks;
       this.blockBytes = frame.blockBytes;
