@@ -16,6 +16,7 @@ type DecodeRequest = {
   height:number;
   buffer:ArrayBuffer;
   maxDepth?:number;
+  maxNumberOfSymbols?:number;
 };
 
 type DecodePoint = { x:number; y:number };
@@ -57,12 +58,12 @@ function boxFromPosition(position:unknown):DecodeBox|undefined{
   };
 }
 
-async function decodeWasm(data:Uint8ClampedArray,width:number,height:number){
+async function decodeWasm(data:Uint8ClampedArray,width:number,height:number,maxNumberOfSymbols:number){
   const results=await readBarcodes(
-    {data:new Uint8ClampedArray(data),width,height} as unknown as ImageData,
+    {data,width,height} as unknown as ImageData,
     {
       formats:['QRCode'],
-      maxNumberOfSymbols:4,
+      maxNumberOfSymbols:Math.max(1,Math.min(4,maxNumberOfSymbols)),
       tryHarder:false,
       tryRotate:false,
       tryInvert:false,
@@ -95,9 +96,10 @@ async function decode(request:DecodeRequest):Promise<DecodeResult>{
   // prepared once per worker and then reused for subsequent reads.
   await zxingWarmup;
   const maxDepth=Math.max(0,Math.min(1,request.maxDepth??1));
+  const maxNumberOfSymbols=Math.max(1,Math.min(4,request.maxNumberOfSymbols??4));
 
   try{
-    const wasm=await decodeWasm(data,request.width,request.height);
+    const wasm=await decodeWasm(data,request.width,request.height,maxNumberOfSymbols);
     if(wasm.values.length>0){
       return {
         id:request.id,
