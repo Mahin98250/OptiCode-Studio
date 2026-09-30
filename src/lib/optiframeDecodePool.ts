@@ -104,6 +104,7 @@ export class OptiFrameDecodePool {
     buffer: ArrayBuffer,
     width: number,
     height: number,
+    previousAnchors: OptiFramePerspectiveDiagnostics['anchors'] | null = null,
   ): Promise<OptiFrameWorkerResult | null> | null {
     const slot = this.workers.find(worker => !worker.failed && !worker.busy);
     if (!slot) return null;
@@ -121,7 +122,7 @@ export class OptiFrameDecodePool {
       });
 
       try {
-        slot.worker.postMessage({ id, width, height, buffer }, [buffer]);
+        slot.worker.postMessage({ id, width, height, buffer, previousAnchors }, [buffer]);
       } catch (error) {
         this.pending.delete(id);
         slot.busy = false;
@@ -131,7 +132,12 @@ export class OptiFrameDecodePool {
   }
 
   async decodeBatch(
-    jobs: Array<{ buffer: ArrayBuffer; width: number; height: number }>,
+    jobs: Array<{
+      buffer: ArrayBuffer;
+      width: number;
+      height: number;
+      previousAnchors?: OptiFramePerspectiveDiagnostics['anchors'] | null;
+    }>,
   ): Promise<Array<OptiFrameWorkerResult | null>> {
     if (jobs.length === 0) return [];
 
@@ -150,7 +156,7 @@ export class OptiFrameDecodePool {
         const item = queue.shift();
         if (!item) return;
 
-        const job = this.decode(item.buffer, item.width, item.height);
+        const job = this.decode(item.buffer, item.width, item.height, item.previousAnchors ?? null);
         if (!job) {
           queue.unshift(item);
           await new Promise<void>(resolve => globalThis.setTimeout(resolve, 0));
