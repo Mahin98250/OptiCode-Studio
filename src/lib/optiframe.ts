@@ -203,6 +203,92 @@ function rasterizeOptiFrameWithDensity(
   return { width: OPTIFRAME_SIZE, height: OPTIFRAME_SIZE, pixels };
 }
 
+export type OptiFrameDensity = 2 | 4;
+
+export function getOptiFrameDensityCapacity(bitsPerCell: OptiFrameDensity) {
+  const bits = Math.max(1, bitsPerCell);
+  return Math.max(0, Math.floor((capacityBits() * bits) / 8) - 4);
+}
+
+export function rasterizeOptiFrameWithDensity(
+  payload: Uint8Array,
+  sequence = 0,
+  total = 1,
+  bitsPerCell: OptiFrameDensity = 2,
+  version = HEADER_VERSION,
+  luminanceLevels = LUMINANCE_LEVELS,
+) {
+  const capacity = getOptiFrameDensityCapacity(bitsPerCell);
+  if (payload.length > capacity) throw new Error('OptiFrame payload is too large for this density.');
+  if (!Number.isInteger(sequence) || sequence < 0 || sequence > 65535 || !Number.isInteger(total) || total < 1 || total > 65535) {
+    throw new Error('OptiFrame metadata is out of range.');
+  }
+
+  const headerBytes = 9;
+  const header = new Uint8Array(headerBytes);
+  header[0] = MAGIC >>> 8;
+  header[1] = MAGIC & 255;
+  header[2] = (version << 4) | ((sequence >>> 12) & 0x0f);
+  header[3] = (sequence >>> 4) & 255;
+  header[4] = ((sequence & 0x0f) << 4) | ((total >>> 12) & 0x0f);
+  header[5] = (total >>> 4) & 255;
+  header[6] = ((total & 0x0f) << 4) | ((payload.length >>> 12) & 0x0f);
+  header[7] = (payload.length >>> 4) & 255;
+  header[8] = (payload.length & 0x0f) << 4;
+
+  const body = new Uint8Array(payload.length + 4);
+  body.set(payload);
+  const crc = crc32(payload);
+  body[payload.length] = crc >>> 24;
+  body[payload.length + 1] = crc >>> 16;
+  body[payload.length + 2] = crc >>> 8;
+  body[payload.length + 3] = crc;
+
+  const pixels = new Uint8ClampedArray(OPTIFRAME_SIZE * OPTIFRAME_SIZE * 4);
+  pixels.fill(255);
+
+  for (const coord of FINDER_CELL_COORDS) {
+    const r = coord >>> 8;
+    const col = coord & 255;
+    const i = (r * OPTIFRAME_SIZE + col) * 4;
+    const origin = zoneOrigin(r, col)!;
+    const level = finderBit(r - origin[0], col - origin[1]) ? luminanceLevels.length - 1 : 0;
+    const lum = luminanceLevels[level];
+    pixels[i] = lum;
+    pixels[i + 1] = lum;
+    pixels[i + 2] = lum;
+    pixels[i + 3] = 255;
+  }
+
+  let cursorBits = 0;
+  for (const coord of DATA_CELL_COORDS) {
+    const r = coord >>> 8;
+    const col = coord & 255;
+    const i = (r * OPTIFRAME_SIZE + col) * 4;
+    let symbol = 0;
+    if (cursorBits < HEADER_BITS) {
+      const bit = cursorBits;
+      const headerBit = (header[bit >>> 3] >>> (7 - (bit & 7))) & 1;
+      symbol = headerBit;
+      cursorBits += 1;
+    } else {
+      const bodyBit = cursorBits - HEADER_BITS;
+      const bits = Math.min(bitsPerCell, body.length * 8 - bodyBit);
+      for (let b = 0; b < bits; b += 1) {
+        symbol = (symbol << 1) | ((body[(bodyBit + b) >>> 3] >>> (7 - ((bodyBit + b) & 7))) & 1);
+      }
+      cursorBits += bits;
+    }
+    const lum = luminanceLevels[Math.min(luminanceLevels.length - 1, symbol)];
+    pixels[i] = lum;
+    pixels[i + 1] = lum;
+    pixels[i + 2] = lum;
+    pixels[i + 3] = 255;
+  }
+
+  return { width: OPTIFRAME_SIZE, height: OPTIFRAME_SIZE, pixels };
+}
+
 export function rasterizeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   return rasterizeOptiFrameWithDensity(payload, sequence, total, 2, HEADER_VERSION, LUMINANCE_LEVELS);
 }
