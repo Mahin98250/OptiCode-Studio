@@ -1007,20 +1007,62 @@ export function Transfer() {
     }
   }
 
-  function updateOpticalGuide(boxes:Array<{x:number;y:number;width:number;height:number}>, frameWidth:number, frameHeight:number, detected:boolean){
+  type OpticalFrameMetrics = {
+    brightness:number;
+    contrast:number;
+    edgeEnergy:number;
+    clippedHighlights:number;
+  };
+
+  function updateOpticalGuide(
+    boxes:Array<{x:number;y:number;width:number;height:number}>,
+    frameWidth:number,
+    frameHeight:number,
+    detected:boolean,
+    metrics?:OpticalFrameMetrics,
+  ){
     if(!receivingRef.current) return;
 
+    const misses=noDetectionDecodeCountRef.current;
+    const brightness=metrics?.brightness ?? 128;
+    const contrast=metrics?.contrast ?? 64;
+    const edgeEnergy=metrics?.edgeEnergy ?? 18;
+    const clippedHighlights=metrics?.clippedHighlights ?? 0;
+
+    // Give environmental problems a useful instruction even before a QR is
+    // successfully decoded. This is deliberately conservative: lighting
+    // guidance should not hide a real positioning problem.
     if(!detected || boxes.length===0){
       guideStableCountRef.current=0;
-      const misses=noDetectionDecodeCountRef.current;
-      const searching=misses<5;
+
+      if(brightness<38){
+        setOpticalGuide({
+          tone:'light',
+          title:'Too dark — brighten the sender screen',
+          detail:'Increase the sender screen brightness and avoid a dark room. The camera needs clear module contrast.',
+          quality:18,
+        });
+        return;
+      }
+
+      if(clippedHighlights>0.18 && contrast<42){
+        setOpticalGuide({
+          tone:'light',
+          title:'Reduce glare',
+          detail:'Tilt the phone or sender screen slightly. Reflections can wash out the QR modules.',
+          quality:24,
+        });
+        return;
+      }
+
+      const searching=misses<4;
       setOpticalGuide({
         tone:searching?'searching':'closer',
-        title:searching?"Point at the other device's screen":'Move a little closer',
+        title:searching?'Find the sender screen':'Move closer and fill the guide',
         detail:searching
-          ?'Keep the sender display inside the camera guide.'
-          :'Make the QR stream large enough for the camera to resolve reliably.',
-        quality:searching?12:Math.max(24,Math.min(42,misses*3)),
+          ?'Point the camera at the other device. Keep the whole QR/screen area visible.'
+          :'The camera is not resolving the code yet. Bring the phone closer while keeping the entire guide visible.',
+        quality:searching?10:Math.max(22,Math.min(46,misses*4)),
       });
       return;
     }
@@ -1028,8 +1070,10 @@ export function Transfer() {
     const primary=boxes.reduce((best,box)=>box.width*box.height>best.width*best.height?box:best,boxes[0]);
     const cx=(primary.x+primary.width/2)/Math.max(1,frameWidth);
     const cy=(primary.y+primary.height/2)/Math.max(1,frameHeight);
-    const size=Math.min(primary.width/Math.max(1,frameWidth),primary.height/Math.max(1,frameHeight));
-    const centered=Math.abs(cx-.5)<.14 && Math.abs(cy-.5)<.14;
+    const widthRatio=primary.width/Math.max(1,frameWidth);
+    const heightRatio=primary.height/Math.max(1,frameHeight);
+    const size=Math.min(widthRatio,heightRatio);
+    const centered=Math.abs(cx-.5)<.12 && Math.abs(cy-.5)<.12;
     const previous=lastGuideBoxRef.current;
     const movement=previous
       ? Math.hypot(
@@ -1038,52 +1082,94 @@ export function Transfer() {
         )
       : 0;
     lastGuideBoxRef.current=primary;
-    if(movement<.025) guideStableCountRef.current+=1;
+    if(movement<.022) guideStableCountRef.current+=1;
     else guideStableCountRef.current=0;
+
+    // Lighting still matters after detection. A decoded frame can be readable
+    // but too marginal for stable high-rate reception.
+    if(brightness<42){
+      setOpticalGuide({
+        tone:'light',
+        title:'A little more light',
+        detail:'The code is visible, but the image is dark. Increase screen brightness for faster, steadier reads.',
+        quality:58,
+      });
+      return;
+    }
+
+    if(clippedHighlights>0.24 && contrast<48){
+      setOpticalGuide({
+        tone:'light',
+        title:'Reduce screen glare',
+        detail:'Tilt either device slightly until the white QR area is evenly lit.',
+        quality:60,
+      });
+      return;
+    }
 
     if(!centered){
       const horizontal=Math.abs(cx-.5);
       const vertical=Math.abs(cy-.5);
       let title='';
-      if(horizontal>=vertical) title=cx<.5?'Move slightly right':'Move slightly left';
-      else title=cy<.5?'Move slightly down':'Move slightly up';
+      if(horizontal>=vertical) title=cx<.5?'Move right':'Move left';
+      else title=cy<.5?'Move down':'Move up';
       setOpticalGuide({
         tone:'center',
         title,
-        detail:'Center the sender screen inside the guide.',
-        quality:55,
+        detail:`The detected QR is ${Math.round(Math.max(horizontal,vertical)*100)}% off-center. Place the sender screen inside the target frame.`,
+        quality:58,
       });
       return;
     }
 
-    if(size<.20){
+    if(size<.22){
       setOpticalGuide({
         tone:'closer',
-        title:'Move a little closer',
+        title:'Move closer',
         detail:boxes.length>1
-          ?`The ${boxes.length} QR regions are too small. Bring the phone closer.`
-          :'The QR is too small for reliable camera decoding.',
-        quality:42,
+          ?`All ${boxes.length} QR lanes are small. Bring the phone closer until the codes fill more of the guide.`
+          :'The QR is too small in the camera view. Move closer until it fills the target area.',
+        quality:46,
       });
       return;
     }
 
-    if(size>.78){
+    if(size>.72){
       setOpticalGuide({
         tone:'farther',
-        title:'Move a little farther away',
-        detail:'Give the camera more room around the sender screen.',
-        quality:48,
+        title:'Move slightly farther away',
+        detail:'The QR is too close to the camera. Back up until the whole code and its clear border fit inside the guide.',
+        quality:52,
       });
       return;
     }
 
-    if(movement>.07){
+    if(edgeEnergy<7 && contrast<34){
       setOpticalGuide({
         tone:'steady',
-        title:'Hold still',
-        detail:'QR detected. Keep the phone still while the frame is captured.',
+        title:'Improve focus',
+        detail:'The image looks soft. Hold the phone still for autofocus, then move slightly farther away if the code stays blurry.',
+        quality:62,
+      });
+      return;
+    }
+
+    if(movement>.055){
+      setOpticalGuide({
+        tone:'steady',
+        title:'Hold the phone steady',
+        detail:'The code is in range. Keep the camera still for a moment so the decoder can lock onto the modules.',
         quality:72,
+      });
+      return;
+    }
+
+    if(boxes.length>1 && boxes.length<4){
+      setOpticalGuide({
+        tone:'steady',
+        title:`${boxes.length} lanes locked — keep the full screen visible`,
+        detail:'Part of the multi-QR layout is being missed. Widen the view slightly so every lane stays inside the camera frame.',
+        quality:84,
       });
       return;
     }
@@ -1091,23 +1177,60 @@ export function Transfer() {
     if(guideStableCountRef.current>=3){
       setOpticalGuide({
         tone:'ready',
-        title:'Perfect — hold still',
+        title:'Excellent — keep it steady',
         detail:boxes.length>1
-          ?`${boxes.length} QR lanes detected · signal is ready`
-          :'Ready to receive.',
-        quality:96,
+          ?`${boxes.length} QR lanes locked · receiver is ready for high-rate transfer`
+          :'QR locked · receiver is ready for high-rate transfer',
+        quality:98,
       });
       return;
     }
 
     setOpticalGuide({
       tone:'steady',
-      title:'Hold still',
+      title:'QR locked — hold steady',
       detail:boxes.length>1
-        ?`${boxes.length} QR lanes detected · keep the sender screen in view`
-        :'Code found · keep the other screen inside the guide.',
-      quality:86,
+        ?`${boxes.length} QR lanes detected · keep the entire sender screen visible`
+        :'Code found · keep the sender screen inside the guide.',
+      quality:88,
     });
+  }
+
+  function estimateOpticalFrameMetrics(image:ImageData):OpticalFrameMetrics{
+    // Sparse sampling keeps this cheap enough for the live receiver. We use
+    // luminance, local contrast and edge energy rather than expensive blur
+    // detection so the guide never becomes the bottleneck.
+    const data=image.data;
+    const step=Math.max(8,Math.floor(Math.sqrt((image.width*image.height)/900)));
+    let count=0;
+    let sum=0;
+    let sumSq=0;
+    let edgeSum=0;
+    let clipped=0;
+
+    for(let y=0;y<image.height;y+=step){
+      let previousLuma=-1;
+      for(let x=0;x<image.width;x+=step){
+        const i=(y*image.width+x)*4;
+        const luma=0.2126*data[i]+0.7152*data[i+1]+0.0722*data[i+2];
+        sum+=luma;
+        sumSq+=luma*luma;
+        if(luma>248) clipped+=1;
+        if(previousLuma>=0) edgeSum+=Math.abs(luma-previousLuma);
+        previousLuma=luma;
+        count+=1;
+      }
+    }
+
+    if(count===0) return {brightness:128,contrast:64,edgeEnergy:18,clippedHighlights:0};
+    const brightness=sum/count;
+    const variance=Math.max(0,sumSq/count-brightness*brightness);
+    return {
+      brightness,
+      contrast:Math.sqrt(variance),
+      edgeEnergy:edgeSum/Math.max(1,count),
+      clippedHighlights:clipped/count,
+    };
   }
 
   function resetReading(){
@@ -1366,6 +1489,7 @@ export function Transfer() {
           void job.then(async decoded=>{
             const processStarted=performance.now();
             qrDetectionsRef.current+=decoded.values.length;
+            const frameMetrics=estimateOpticalFrameMetrics(image);
             if(decoded.values.length>0){
               const guideBoxes=(decoded.boxes ?? []).map(box=>useCenterRecovery
                 ? {
@@ -1380,9 +1504,9 @@ export function Transfer() {
                     width:Math.max(1,Math.floor((box.width/Math.max(1,width))*sourceWidth)),
                     height:Math.max(1,Math.floor((box.height/Math.max(1,height))*sourceHeight)),
                   });
-              updateOpticalGuide(guideBoxes,sourceWidth,sourceHeight,true);
+              updateOpticalGuide(guideBoxes,sourceWidth,sourceHeight,true,frameMetrics);
             }else{
-              updateOpticalGuide([],sourceWidth,sourceHeight,false);
+              updateOpticalGuide([],sourceWidth,sourceHeight,false,frameMetrics);
             }
             if(decoded.values.length>0){
               lastDetectionRef.current=decoded.values[0].slice(0,48);
