@@ -13,8 +13,8 @@ export class QrDecodePool{
   private readonly failed=new Set<number>();
   private nextId=1;
 
-  constructor(size=Math.min(2,Math.max(1,((typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 2)||2)-1))){
-    const count=Math.max(1,Math.min(3,size));
+  constructor(size=Math.min(4,Math.max(1,((typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 4)||4)-1))){
+    const count=Math.max(1,Math.min(4,size));
     for(let i=0;i<count;i+=1){
       const worker=new Worker(new URL('../workers/qrDecoder.worker.ts',import.meta.url),{type:'module'});
       const workerIndex=i;
