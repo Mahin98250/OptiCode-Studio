@@ -1356,7 +1356,6 @@ export function OptiFrameLab() {
                  aria-label={`OptiFrame ${laneCount} lane optical stream surface`}
                  className="optiframe-surface block h-auto w-full max-w-[1080px]"
                  style={{ aspectRatio: `${laneLayout.columns} / ${laneLayout.rows}` }}
-                className={`optiframe-surface block h-auto w-full max-w-[760px] ${getOptiLaneLayout(laneCount).columns === 3 ? 'aspect-[3/2]' : getOptiLaneLayout(laneCount).columns === 2 && getOptiLaneLayout(laneCount).rows === 1 ? 'aspect-[2/1]' : 'aspect-square'}`}
               />
              ) : <div className="w-full max-w-[1080px]" style={{ aspectRatio: `${laneLayout.columns} / ${laneLayout.rows}` }} />
           </div>
