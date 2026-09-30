@@ -39,28 +39,6 @@ function crc32(bytes: Uint8Array) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function writeBits(out: number[], value: number, count: number) {
-  for (let b = count - 1; b >= 0; b--) out.push((value >>> b) & 1);
-}
-
-function readBits(bits: number[], offset: number, count: number) {
-  let value = 0;
-  for (let i = 0; i < count; i++) value = (value << 1) | bits[offset + i];
-  return value >>> 0;
-}
-
-function bytesToBits(bytes: Uint8Array) {
-  const out: number[] = [];
-  for (const byte of bytes) writeBits(out, byte, 8);
-  return out;
-}
-
-function bitsToBytes(bits: number[]) {
-  const out = new Uint8Array(Math.floor(bits.length / 8));
-  for (let i = 0; i < out.length; i++) out[i] = readBits(bits, i * 8, 8);
-  return out;
-}
-
 function finderBit(r: number, c: number) {
   const edge = r === 0 || c === 0 || r === FINDER_SIZE - 1 || c === FINDER_SIZE - 1;
   const ring = r === 1 || c === 1 || r === 7 || c === 7;
@@ -212,38 +190,45 @@ function quantize(v: number) {
   return v < 43 ? 0 : v < 128 ? 1 : v < 213 ? 2 : 3;
 }
 
+function decodePackedFrame(packed: Uint8Array) {
+  if (packed.length < 8 + 4) return null;
+
+  const magic = (packed[0] << 8) | packed[1];
+  const version = packed[2] >>> 4;
+  const sequence = ((packed[2] & 0x0f) << 12) | (packed[3] << 4) | (packed[4] >>> 4);
+  const total = ((packed[4] & 0x0f) << 12) | (packed[5] << 4) | (packed[6] >>> 4);
+  const length = ((packed[6] & 0x0f) << 8) | packed[7];
+  if (magic !== MAGIC || version !== HEADER_VERSION || total < 1 || length > OPTIFRAME_MAX_PAYLOAD) return null;
+
+  const payloadStart = 8;
+  const end = payloadStart + length + 4;
+  if (end > packed.length) return null;
+  const payload = packed.slice(payloadStart, payloadStart + length);
+  const expected = (
+    (packed[payloadStart + length] << 24) |
+    (packed[payloadStart + length + 1] << 16) |
+    (packed[payloadStart + length + 2] << 8) |
+    packed[payloadStart + length + 3]
+  ) >>> 0;
+  if (crc32(payload) !== expected) return null;
+  return { version, sequence, total, payload } as OptiFrame;
+}
+
 function decodeAxisAlignedImage(image: ImageData) {
   if (image.width !== OPTIFRAME_SIZE || image.height !== OPTIFRAME_SIZE) return null;
-  const bits: number[] = [];
+  const packed = new Uint8Array(8 + Math.ceil((capacityBits() + 7) / 8));
+  let cursorBits = 0;
   for (let r = 0; r < OPTIFRAME_SIZE; r++) {
     for (let col = 0; col < OPTIFRAME_SIZE; col++) {
       if (isFinderCell(r, col)) continue;
       const i = (r * OPTIFRAME_SIZE + col) * 4;
       const level = quantize((image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3);
-      bits.push((level >>> 1) & 1, level & 1);
+      const byteIndex = cursorBits >>> 3;
+      packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
+      cursorBits += 2;
     }
   }
-  return decodeBits(bits);
-}
-
-function decodeBits(bits: number[]) {
-  if (bits.length < HEADER_BITS + 32) return null;
-
-  const magic = readBits(bits, 0, 16);
-  const version = readBits(bits, 16, 4);
-  const sequence = readBits(bits, 20, 16);
-  const total = readBits(bits, 36, 16);
-  const length = readBits(bits, 52, 12);
-  if (magic !== MAGIC || version !== HEADER_VERSION || total < 1 || length > OPTIFRAME_MAX_PAYLOAD) return null;
-
-  const byteBits = bits.slice(HEADER_BITS, HEADER_BITS + (length + 4) * 8);
-  if (byteBits.length < (length + 4) * 8) return null;
-  const bytes = bitsToBytes(byteBits);
-  const payload = bytes.slice(0, length);
-  const expected = ((bytes[length] << 24) | (bytes[length + 1] << 16) | (bytes[length + 2] << 8) | bytes[length + 3]) >>> 0;
-  if (crc32(payload) !== expected) return null;
-
-  return { version, sequence, total, payload } as OptiFrame;
+  return decodePackedFrame(packed);
 }
 
 export function decodeOptiFrame(source: CanvasImageSource | ImageData) {
@@ -530,7 +515,8 @@ function decodePerspectiveFromAnchors(image: ImageData, anchors: PerspectiveAnch
   const shortest = Math.max(1, Math.min(topWidth, bottomWidth, leftHeight, rightHeight));
   if (longest / shortest > 2.75) return null;
 
-  const bits: number[] = [];
+  const packed = new Uint8Array(8 + Math.ceil((capacityBits() + 7) / 8));
+  let cursorBits = 0;
   for (let r = 0; r < OPTIFRAME_SIZE; r++) {
     for (let col = 0; col < OPTIFRAME_SIZE; col++) {
       if (isFinderCell(r, col)) continue;
@@ -539,10 +525,12 @@ function decodePerspectiveFromAnchors(image: ImageData, anchors: PerspectiveAnch
       const raw = sampleModule(image, sx, sy, moduleScale);
       const normalized = Math.max(0, Math.min(255, (raw - calibration.dark) * 255 / (calibration.light - calibration.dark)));
       const level = quantize(normalized);
-      bits.push((level >>> 1) & 1, level & 1);
+      const byteIndex = cursorBits >>> 3;
+      packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
+      cursorBits += 2;
     }
   }
-  return decodeBits(bits);
+  return decodePackedFrame(packed);
 }
 
 function solveHomography(
