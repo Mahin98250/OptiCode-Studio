@@ -53,7 +53,11 @@ type ZxingReader = {
 };
 
 type NativeQrDetector = {
-  detect(source:HTMLVideoElement):Promise<Array<{rawValue?:string;format?:string}>>;
+  detect(source:HTMLVideoElement):Promise<Array<{
+    rawValue?:string;
+    format?:string;
+    boundingBox?:{x:number;y:number;width:number;height:number};
+  }>>;
 };
 
 type OpticalGuideState = {
@@ -846,6 +850,11 @@ export function Transfer() {
     nativeActiveRef.current=false;
     nativeInFlightRef.current=false;
     nativeDetectorRef.current=null;
+    opticalTrackRef.current=null;
+    lastGuideBoxRef.current=null;
+    guideStableCountRef.current=0;
+    setOpticalTrack({confidence:0,predicted:false,ageMs:0});
+    setOpticalGuideRect(null);
     setReceiving(false);
     if(ackPublishTimerRef.current!==null){
       window.clearTimeout(ackPublishTimerRef.current);
@@ -932,6 +941,34 @@ export function Transfer() {
         try{
           const found=await nativeDetectorRef.current.detect(video);
           const values=found.map(item=>item.rawValue).filter((value):value is string=>Boolean(value));
+          const nativeBoxes=found
+            .map(item=>item.boundingBox)
+            .filter((box):box is {x:number;y:number;width:number;height:number}=>Boolean(box));
+
+          // BarcodeDetector can publish geometry before the deterministic
+          // worker finishes decoding the payload. Use that geometry only when
+          // the worker has not refreshed the tracker very recently; this makes
+          // the visual square feel immediate without letting two decoders fight
+          // over the lock position.
+          const workerTrack=opticalTrackRef.current;
+          const workerTrackFresh=workerTrack ? performance.now()-workerTrack.lastSeenAt<180 : false;
+          if(nativeBoxes.length>0 && !workerTrackFresh && video.videoWidth>0 && video.videoHeight>0){
+            const metricsCanvas=recoveryCanvasRef.current ?? document.createElement('canvas');
+            recoveryCanvasRef.current=metricsCanvas;
+            const metricsCtx=metricsCanvas.getContext('2d',{willReadFrequently:true});
+            if(metricsCtx){
+              const sample=Math.min(360,Math.min(video.videoWidth,video.videoHeight));
+              metricsCanvas.width=sample;
+              metricsCanvas.height=sample;
+              metricsCtx.imageSmoothingEnabled=false;
+              const sx=Math.max(0,Math.floor((video.videoWidth-sample)/2));
+              const sy=Math.max(0,Math.floor((video.videoHeight-sample)/2));
+              metricsCtx.drawImage(video,sx,sy,sample,sample,0,0,sample,sample);
+              updateOpticalGuide(nativeBoxes,video.videoWidth,video.videoHeight,true,estimateOpticalFrameMetrics(metricsCtx.getImageData(0,0,sample,sample)));
+            }else{
+              updateOpticalGuide(nativeBoxes,video.videoWidth,video.videoHeight,true);
+            }
+          }
 
           if(values.length>0){
             qrDetectionsRef.current+=values.length;
