@@ -1,4 +1,4 @@
-import { encodeOptiFrame, OPTIFRAME_SIZE, type OptiFrame } from './optiframe';
+import { encodeOptiFrame, encodeOptiFrameDense4, OPTIFRAME_SIZE, type OptiFrame, type OptiFrameDensity } from './optiframe';
 
 export type OptiLaneCount = 1 | 2 | 4 | 6 | 9 | 12 | 16;
 
@@ -78,6 +78,7 @@ export function createOptiLaneSurface(
   total: number,
   laneCount: OptiLaneCount,
   frameCache?: OptiFrameCanvasCache,
+  densityBits: OptiFrameDensity = 2,
 ) {
   if (payloads.length !== laneCount) {
     throw new Error(`Expected ${laneCount} lane payloads.`);
@@ -101,9 +102,11 @@ export function createOptiLaneSurface(
   const frames: OptiFrame[] = [];
   for (let lane = 0; lane < laneCount; lane += 1) {
     const sequence = getOptiLaneSequence(baseSequence, lane, total);
-    const canvas = frameCache
-      ? frameCache.get(payloads[lane], sequence, total)
-      : encodeOptiFrame(payloads[lane], sequence, total).canvas;
+    const canvas = densityBits === 4
+      ? encodeOptiFrameDense4(payloads[lane], sequence, total).canvas
+      : frameCache
+        ? frameCache.get(payloads[lane], sequence, total)
+        : encodeOptiFrame(payloads[lane], sequence, total).canvas;
     frames.push({
       version: 2,
       sequence,
