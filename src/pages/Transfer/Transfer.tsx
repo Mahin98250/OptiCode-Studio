@@ -213,6 +213,9 @@ export function Transfer() {
       opticalVisualTargetRef.current=null;
       opticalVisualCurrentRef.current=null;
       opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
+      opticalVisualQuadTargetRef.current=null;
+      opticalVisualQuadCurrentRef.current=null;
+      opticalVisualQuadVelocityRef.current=[];
       opticalGuideVisibleRef.current=false;
       setOpticalGuideRect(null);
       return;
@@ -250,6 +253,39 @@ export function Transfer() {
         }else{
           setOpticalGuideRect(next);
         }
+
+        const targetQuad=opticalVisualQuadTargetRef.current;
+        const currentQuad=opticalVisualQuadCurrentRef.current;
+        const polygon=opticalGuidePolygonRef.current;
+        if(targetQuad && targetQuad.length===4){
+          const quad=currentQuad ?? targetQuad;
+          const velocities=opticalVisualQuadVelocityRef.current;
+          while(velocities.length<4)velocities.push({x:0,y:0});
+          const nextQuad=quad.map((point,index)=>{
+            const targetPoint=targetQuad[index];
+            const displacementX=point.x-targetPoint.x;
+            const displacementY=point.y-targetPoint.y;
+            const vx=velocities[index].x;
+            const vy=velocities[index].y;
+            const e=Math.exp(-omega*dt);
+            const nextPoint={
+              x:targetPoint.x+(displacementX+(vx+omega*displacementX)*dt)*e,
+              y:targetPoint.y+(displacementY+(vy+omega*displacementY)*dt)*e,
+            };
+            velocities[index]={
+              x:(vx-omega*(vx+omega*displacementX)*dt)*e,
+              y:(vy-omega*(vy+omega*displacementY)*dt)*e,
+            };
+            return nextPoint;
+          });
+          opticalVisualQuadCurrentRef.current=nextQuad;
+          if(polygon){
+            polygon.setAttribute('points',nextQuad.map(point=>`${point.x},${point.y}`).join(' '));
+            polygon.style.opacity='1';
+          }
+        }else if(polygon){
+          polygon.style.opacity='0';
+        }
       }
       opticalVisualRafRef.current=requestAnimationFrame(tick);
     };
@@ -272,7 +308,11 @@ export function Transfer() {
   const opticalVisualVelocityRef=useRef({left:0,top:0,width:0,height:0});
   const opticalVisualRafRef=useRef<number|null>(null);
   const opticalGuideOverlayRef=useRef<HTMLDivElement|null>(null);
+  const opticalGuidePolygonRef=useRef<SVGPolygonElement|null>(null);
   const opticalGuideVisibleRef=useRef(false);
+  const opticalVisualQuadTargetRef=useRef<Array<{x:number;y:number}>|null>(null);
+  const opticalVisualQuadCurrentRef=useRef<Array<{x:number;y:number}>|null>(null);
+  const opticalVisualQuadVelocityRef=useRef<Array<{x:number;y:number}>>([]);
   const opticalGroupBoxRef=useRef<{x:number;y:number;width:number;height:number}|null>(null);
   const opticalGroupLastSeenRef=useRef(0);
   const decodeMaxDimensionRef=useRef(1120);
@@ -1202,7 +1242,7 @@ export function Transfer() {
       return Math.max(.12,1-((size-.76)/.24)*.7);
     };
 
-    const setRectFromBox=(box:{x:number;y:number;width:number;height:number})=>{
+    const setRectFromBox=(box:{x:number;y:number;width:number;height:number},corners?:Array<{x:number;y:number}>)=>{
       // QR is fundamentally square. The tracker renders a padded square around
       // the decoded quadrilateral/bounding box so perspective changes don't make
       // the lock appear to wobble between a wide and tall rectangle.
@@ -1231,6 +1271,20 @@ export function Transfer() {
         width:Math.max(1,Math.min(100,(square.width/frameWidth)*contentWidth/elementWidth*100)),
         height:Math.max(1,Math.min(100,(square.height/frameHeight)*contentHeight/elementHeight*100)),
       };
+      const quadCorners=(corners && corners.length>=4 ? corners.slice(0,4) : [
+        {x:square.x,y:square.y},
+        {x:square.x+square.width,y:square.y},
+        {x:square.x+square.width,y:square.y+square.height},
+        {x:square.x,y:square.y+square.height},
+      ]).map(point=>({
+        x:Math.max(0,Math.min(100,(offsetX+(point.x/frameWidth)*contentWidth)/elementWidth*100)),
+        y:Math.max(0,Math.min(100,(offsetY+(point.y/frameHeight)*contentHeight)/elementHeight*100)),
+      }));
+      opticalVisualQuadTargetRef.current=quadCorners;
+      if(!opticalVisualQuadCurrentRef.current){
+        opticalVisualQuadCurrentRef.current=quadCorners;
+        opticalVisualQuadVelocityRef.current=quadCorners.map(()=>({x:0,y:0}));
+      }
       opticalVisualTargetRef.current=targetRect;
       // React only owns visibility. Position/size are mutated directly on the
       // overlay DOM node at display-frame cadence, avoiding a component-tree
@@ -1424,9 +1478,12 @@ export function Transfer() {
       if(movement<.018) guideStableCountRef.current+=1;
       else if(movement>.045) guideStableCountRef.current=0;
 
-      setRectFromBox(boxes.length>1
-        ? {x:guideBox.x,y:guideBox.y,width:guideWidth,height:guideHeight}
-        : next.box);
+      setRectFromBox(
+        boxes.length>1
+          ? {x:guideBox.x,y:guideBox.y,width:guideWidth,height:guideHeight}
+          : next.box,
+        boxes.length===1 && corners ? corners : undefined,
+      );
 
       const previousDistance=guideDistanceRef.current;
       let distance:OpticalGuideDiagnostics['distance'];
@@ -1566,6 +1623,9 @@ export function Transfer() {
     opticalVisualTargetRef.current=null;
     opticalVisualCurrentRef.current=null;
     opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
+    opticalVisualQuadTargetRef.current=null;
+    opticalVisualQuadCurrentRef.current=null;
+    opticalVisualQuadVelocityRef.current=[];
     opticalGuideVisibleRef.current=false;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideRect(null);
@@ -2213,6 +2273,26 @@ export function Transfer() {
                   </span>
                 </div>
               </div>
+
+              {opticalGuideRect&&(
+                <svg
+                  className="pointer-events-none absolute inset-0 z-[5] h-full w-full overflow-visible text-cyan-300"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <polygon
+                    ref={opticalGuidePolygonRef}
+                    points="0,0 0,0 0,0 0,0"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="0.45"
+                    vectorEffect="non-scaling-stroke"
+                    strokeLinejoin="round"
+                    style={{opacity:0}}
+                  />
+                </svg>
+              )}
 
               {opticalGuideRect&&(
                 <div
