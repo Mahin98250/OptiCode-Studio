@@ -1,5 +1,7 @@
 import jsQR from 'jsqr';
-import { readBarcodes } from 'zxing-wasm/reader';
+import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
+
+const zxingWarmup=prepareZXingModule({fireImmediately:true}).then(()=>true).catch(()=>false);
 
 type DecodeRequest = {
   id:number;
@@ -78,6 +80,9 @@ async function decodeWasm(data:Uint8ClampedArray,width:number,height:number){
 async function decode(request:DecodeRequest):Promise<DecodeResult>{
   const started=performance.now();
   const data=new Uint8ClampedArray(request.buffer);
+  // Keep the WASM instantiation off the first optical frame. The module is
+  // prepared once per worker and then reused for subsequent reads.
+  await zxingWarmup;
   const maxDepth=Math.max(0,Math.min(1,request.maxDepth??1));
 
   try{
