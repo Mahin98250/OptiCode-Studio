@@ -16,7 +16,7 @@ type ModuleMatrix = { size: number; data: Uint8Array | boolean[] };
 
 function encode(value: string) {
   const started = performance.now();
-  const code = QRCode.create(value, { errorCorrectionLevel: 'M' }) as unknown as { modules: ModuleMatrix };
+  const code = QRCode.create(value, { errorCorrectionLevel: 'L' }) as unknown as { modules: ModuleMatrix };
   const raw = code.modules.data;
   const data = raw instanceof Uint8Array
     ? raw.slice()
