@@ -1308,8 +1308,6 @@ export function Transfer() {
     applyMessage('No QR code detected','No valid QR code has been confirmed in the camera view. Point the camera at the sender screen or QR code.','searching',0);
   };
 
-  }
-
   function estimateOpticalFrameMetrics(image:ImageData):OpticalFrameMetrics{
     // Sparse sampling keeps this cheap enough for the live receiver. We use
     // luminance, local contrast and edge energy rather than expensive blur
