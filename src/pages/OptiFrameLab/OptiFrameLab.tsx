@@ -563,21 +563,74 @@ export function OptiFrameLab() {
 
     const capture = captureCanvasRef.current ?? document.createElement('canvas');
     captureCanvasRef.current = capture;
-    // Preserve more camera detail for small optical cells. The display surface
-    // is now rendered at 3× protocol resolution, so downscaling to 720 px would
-    // throw away exactly the pixels we need for reliable finder/anchor detection.
+    // Preserve enough camera detail for small optical cells, but avoid copying the
+    // entire 1440p frame once a lock exists. The locked 1× path captures only the
+    // predicted optical ROI directly from the video, cutting memory bandwidth and
+    // getImageData cost dramatically.
     const maxDimension = 1440;
     const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
     const width = Math.max(1, Math.round(video.videoWidth * scale));
     const height = Math.max(1, Math.round(video.videoHeight * scale));
-    if (capture.width !== width) capture.width = width;
-    if (capture.height !== height) capture.height = height;
     const context = capture.getContext('2d', { willReadFrequently: true });
     if (!context) return;
-    context.drawImage(video, 0, 0, width, height);
-    const image = context.getImageData(0, 0, width, height);
 
     const captureStarted = performance.now();
+    const directTrackingAvailable =
+      laneCount === 1 &&
+      !acquisitionTestRef.current &&
+      trackedAnchorsRef.current &&
+      framesSinceFullScanRef.current < reacquireEveryFrames;
+
+    let image: ImageData;
+    let directTrackedCrop: { image: ImageData; offsetX: number; offsetY: number } | null = null;
+
+    if (directTrackingAvailable) {
+      const anchors = trackedAnchorsRef.current!;
+      const minX = Math.min(...anchors.map(anchor => anchor.x));
+      const maxX = Math.max(...anchors.map(anchor => anchor.x));
+      const minY = Math.min(...anchors.map(anchor => anchor.y));
+      const maxY = Math.max(...anchors.map(anchor => anchor.y));
+      const anchorScale = anchors.reduce((sum, anchor) => sum + anchor.scale, 0) / anchors.length;
+      const padding = Math.max(18, anchorScale * 12);
+      const side = Math.ceil(Math.max(maxX - minX, maxY - minY) + padding * 2);
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const x = Math.max(0, Math.min(width - side, Math.round(centerX - side / 2)));
+      const y = Math.max(0, Math.min(height - side, Math.round(centerY - side / 2)));
+      const roiWidth = Math.min(side, width - x);
+      const roiHeight = Math.min(side, height - y);
+
+      if (roiWidth >= OPTIFRAME_SIZE && roiHeight >= OPTIFRAME_SIZE) {
+        if (capture.width !== roiWidth) capture.width = roiWidth;
+        if (capture.height !== roiHeight) capture.height = roiHeight;
+        context.imageSmoothingEnabled = false;
+        context.drawImage(
+          video,
+          x / scale,
+          y / scale,
+          roiWidth / scale,
+          roiHeight / scale,
+          0,
+          0,
+          roiWidth,
+          roiHeight,
+        );
+        image = context.getImageData(0, 0, roiWidth, roiHeight);
+        directTrackedCrop = { image, offsetX: x, offsetY: y };
+      } else {
+        if (capture.width !== width) capture.width = width;
+        if (capture.height !== height) capture.height = height;
+        context.imageSmoothingEnabled = false;
+        context.drawImage(video, 0, 0, width, height);
+        image = context.getImageData(0, 0, width, height);
+      }
+    } else {
+      if (capture.width !== width) capture.width = width;
+      if (capture.height !== height) capture.height = height;
+      context.imageSmoothingEnabled = false;
+      context.drawImage(video, 0, 0, width, height);
+      image = context.getImageData(0, 0, width, height);
+    }
 
     if (acquisitionTestRef.current) {
       const probe = inspectOptiFrameAcquisition(image);
@@ -840,7 +893,7 @@ export function OptiFrameLab() {
       }
       return;
     }
-    const trackedCrop = cropTrackedRegion(image);
+    const trackedCrop = directTrackedCrop ?? cropTrackedRegion(image);
     const shouldFullScan = !trackedCrop || framesSinceFullScanRef.current >= reacquireEveryFrames;
     if (trackedCrop && !shouldFullScan) {
       usedTrackedCrop = true;
