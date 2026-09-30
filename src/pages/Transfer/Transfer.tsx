@@ -1221,9 +1221,12 @@ export function Transfer() {
         height:Math.max(1,Math.min(100,(square.height/frameHeight)*contentHeight/elementHeight*100)),
       };
       opticalVisualTargetRef.current=targetRect;
+      // Keep React state aligned with the latest detector target so unrelated
+      // UI renders cannot overwrite the live DOM position with a stale value.
+      // The 60 FPS RAF still owns the in-between animation frames.
+      setOpticalGuideRect(targetRect);
       if(!opticalVisualCurrentRef.current){
         opticalVisualCurrentRef.current=targetRect;
-        setOpticalGuideRect(targetRect);
       }
     };
 
@@ -1546,6 +1549,9 @@ export function Transfer() {
     opticalTrackRef.current=null;
     opticalGroupBoxRef.current=null;
     opticalGroupLastSeenRef.current=0;
+    opticalVisualTargetRef.current=null;
+    opticalVisualCurrentRef.current=null;
+    opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideRect(null);
     guideDistanceRef.current='unknown';
