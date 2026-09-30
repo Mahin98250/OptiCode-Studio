@@ -104,7 +104,7 @@ export function OptiFrameLab() {
   const [streamPlaying, setStreamPlaying] = useState(false);
   const [streamIndex, setStreamIndex] = useState(0);
   const [laneCount, setLaneCount] = useState<OptiLaneCount>(1);
-  const [streamIntervalMs, setStreamIntervalMs] = useState(16);
+  const [streamIntervalMs, setStreamIntervalMs] = useState(8);
   const [transferFile, setTransferFile] = useState<File | null>(null);
   const [transferData, setTransferData] = useState<Uint8Array | null>(null);
   const [opticalFountainPlan, setOpticalFountainPlan] = useState<OpticalFountainPlan | null>(null);
@@ -451,7 +451,7 @@ export function OptiFrameLab() {
       setTransferData(null);
       setOpticalFountainPlan(plan);
       setStreamIndex(0);
-      setStreamIntervalMs(16);
+      setStreamIntervalMs(8);
       setStreamPlaying(false);
       setStatus(
         file.name +
@@ -1214,7 +1214,8 @@ export function OptiFrameLab() {
             <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]">
               Speed
               <select value={streamIntervalMs} onChange={event => setStreamIntervalMs(Number(event.target.value))} className="bg-transparent outline-none">
-                <option value={16}>16 ms</option>
+                <option value={8}>8 ms · 120 Hz target</option>
+                <option value={16}>16 ms · 60 Hz target</option>
                 <option value={24}>24 ms</option>
                 <option value={32}>32 ms</option>
                 <option value={60}>60 ms</option>
