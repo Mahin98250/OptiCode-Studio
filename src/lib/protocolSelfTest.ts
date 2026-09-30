@@ -686,6 +686,24 @@ async function optiFrameMultiLaneRoundTrip() {
   return '1×, 2×, and 4× lane surfaces cropped/decoded · bounded encoded-frame cache reuse verified';
 }
 
+async function optiFrameEncodeThroughputDiagnostic() {
+  const payload = makeBytes(3_900, 217);
+  const samples = 24;
+  const started = performance.now();
+  let pixels = 0;
+  for (let index = 0; index < samples; index += 1) {
+    const encoded = encodeOptiFrame(payload, index, samples);
+    pixels += encoded.canvas.width * encoded.canvas.height;
+  }
+  const elapsed = performance.now() - started;
+  assert(pixels === samples * 128 * 128, 'OptiFrame encode benchmark raster size changed unexpectedly.');
+  assert(Number.isFinite(elapsed), 'OptiFrame encode benchmark returned an invalid duration.');
+  return samples + ' max-payload frames · ' +
+    Math.round(pixels / Math.max(0.001, elapsed / 1000) / 1000) +
+    ' kpixels/s rasterized · ' + Math.round(elapsed) +
+    ' ms total · direct 2-bit packing path exercised';
+}
+
 async function opticalFountainRoundTripDiagnostic() {
   const original = makeBytes(210_000, 187);
   const file = new File([original], 'diagnostic-optical-fountain.bin', { type: 'application/octet-stream' });
@@ -1035,6 +1053,7 @@ export async function runProtocolDiagnostics(
     ['Performance · exact ORX1 QR frame', qrTransferFrameWorkerDiagnostic],
     ['Performance · exact ORF2 fountain QR frame', qrFountainFrameWorkerDiagnostic],
     ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
+    ['Performance · OptiFrame encoder throughput', optiFrameEncodeThroughputDiagnostic],
     ['OptiFrame · binary fountain round trip', opticalFountainRoundTripDiagnostic],
     ['OptiFrame · binary fountain loss recovery', opticalFountainLossRecoveryDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
