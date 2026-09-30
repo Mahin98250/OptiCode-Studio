@@ -53,8 +53,8 @@ export type OpticalFountainPlan = {
   totalBlocks: number;
   blockBytes: number;
   cycleGroups: number;
-  getCycleGroups: (laneCount?: 1 | 2 | 4 | 6) => number;
-  getFrame: (lane: number, group: number, laneCount: 1 | 2 | 4 | 6) => Uint8Array;
+  getCycleGroups: (laneCount?: 1 | 2 | 4 | 6 | 9 | 12 | 16) => number;
+  getFrame: (lane: number, group: number, laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16) => Uint8Array;
 };
 
 export type OpticalFountainReceiveState = {
@@ -387,13 +387,13 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
     Math.ceil(totalBlocks * (1 + OPTICAL_FOUNTAIN_OVERHEAD)),
   );
 
-  const getCycleGroups = (laneCount: 1 | 2 | 4 | 6 = 4) => {
-    const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 ? laneCount : 4;
+  const getCycleGroups = (laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16 = 4) => {
+    const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 || laneCount === 9 || laneCount === 12 || laneCount === 16 ? laneCount : 4;
     return Math.max(1, Math.ceil(recommendedPackets / activeLanes));
   };
 
-  const getFrame = (lane = 0, group = 0, laneCount: 1 | 2 | 4 | 6 = 4) => {
-    const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 ? laneCount : 4;
+  const getFrame = (lane = 0, group = 0, laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16 = 4) => {
+    const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 || laneCount === 9 || laneCount === 12 || laneCount === 16 ? laneCount : 4;
     const normalizedLane = ((lane % activeLanes) + activeLanes) % activeLanes;
     const normalizedGroup = Math.max(0, Math.floor(group));
     const groupsPerCycle = getCycleGroups(activeLanes);
