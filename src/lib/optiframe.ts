@@ -6,6 +6,9 @@ const HEADER_VERSION = 2;
 const FINDER_SIZE = 9;
 const FINDER_OFFSET = 4;
 const LUMINANCE_LEVELS = [0, 85, 170, 255] as const;
+const DENSE4_LUMINANCE_LEVELS = Array.from({ length: 16 }, (_, index) => Math.round(index * 255 / 15));
+const DENSE4_VERSION = 3;
+export type OptiFrameDensity = 2 | 4;
 
 export type OptiFrame = {
   version: number;
@@ -103,28 +106,41 @@ const FINDER_CELL_COORDS: Uint16Array = (() => {
   return Uint16Array.from(cells);
 })();
 
-function capacityBits() {
-  return DATA_CELL_COORDS.length * 2 - HEADER_BITS;
+function capacityBits(bitsPerCell: OptiFrameDensity = 2) {
+  return DATA_CELL_COORDS.length * bitsPerCell - HEADER_BITS;
+}
+
+export function getOptiFrameCapacityForBits(bitsPerCell: OptiFrameDensity) {
+  const hardCap = bitsPerCell === 4 ? Math.floor(capacityBits(bitsPerCell) / 8) - 4 : OPTIFRAME_MAX_PAYLOAD;
+  return Math.max(0, hardCap);
 }
 
 export function getOptiFrameCapacity() {
-  return Math.min(OPTIFRAME_MAX_PAYLOAD, Math.floor(capacityBits() / 8) - 4);
+  return Math.min(OPTIFRAME_MAX_PAYLOAD, Math.floor(capacityBits(2) / 8) - 4);
 }
 
-export function rasterizeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
-  const capacity = getOptiFrameCapacity();
+export function getOptiFrameDense4Capacity() {
+  return getOptiFrameCapacityForBits(4);
+}
+
+function rasterizeOptiFrameWithDensity(
+  payload: Uint8Array,
+  sequence: number,
+  total: number,
+  bitsPerCell: OptiFrameDensity,
+  version: number,
+  levels: readonly number[],
+) {
+  const capacity = getOptiFrameCapacityForBits(bitsPerCell);
   if (payload.length > capacity) throw new Error('OptiFrame payload is too large.');
   if (!Number.isInteger(sequence) || sequence < 0 || sequence > 65535 || !Number.isInteger(total) || total < 1 || total > 65535) {
     throw new Error('OptiFrame metadata is out of range.');
   }
 
-  // Header v2 is 72 bits: magic16 + version4 + sequence16 + total16 +
-  // payloadLength16 + reserved4. This pure raster path is shared by the main
-  // thread encoder and the optional high-speed surface worker.
   const header = new Uint8Array(9);
   header[0] = MAGIC >>> 8;
   header[1] = MAGIC & 255;
-  header[2] = (HEADER_VERSION << 4) | ((sequence >>> 12) & 0x0f);
+  header[2] = (version << 4) | ((sequence >>> 12) & 0x0f);
   header[3] = (sequence >>> 4) & 255;
   header[4] = ((sequence & 0x0f) << 4) | ((total >>> 12) & 0x0f);
   header[5] = (total >>> 4) & 255;
@@ -148,39 +164,51 @@ export function rasterizeOptiFrame(payload: Uint8Array, sequence = 0, total = 1)
     const col = coord & 255;
     const i = (r * OPTIFRAME_SIZE + col) * 4;
     const origin = zoneOrigin(r, col)!;
-    const level = finderBit(r - origin[0], col - origin[1]) ? 3 : 0;
-    const lum = LUMINANCE_LEVELS[level];
+    const level = finderBit(r - origin[0], col - origin[1]) ? levels.length - 1 : 0;
+    const lum = levels[level];
     pixels[i] = lum;
     pixels[i + 1] = lum;
     pixels[i + 2] = lum;
     pixels[i + 3] = 255;
   }
 
-  let cursorBits = 0;
+  let cursor = 0;
   for (const coord of DATA_CELL_COORDS) {
     const r = coord >>> 8;
     const col = coord & 255;
     const i = (r * OPTIFRAME_SIZE + col) * 4;
     let level: number;
-    if (cursorBits < HEADER_BITS) {
-      const headerByte = header[cursorBits >>> 3];
-      const shift = 6 - (cursorBits & 7);
-      level = (headerByte >>> shift) & 3;
+
+    if (cursor < HEADER_BITS) {
+      const byte = header[cursor >>> 3];
+      level = bitsPerCell === 2
+        ? (byte >>> (6 - (cursor & 7))) & 3
+        : (byte >>> (4 - (cursor & 4))) & 15;
     } else {
-      const bodyBit = cursorBits - HEADER_BITS;
-      const bodyByte = body[bodyBit >>> 3];
-      const shift = 6 - (bodyBit & 7);
-      level = (bodyByte >>> shift) & 3;
+      const bodyBit = cursor - HEADER_BITS;
+      const byte = body[bodyBit >>> 3];
+      level = bitsPerCell === 2
+        ? (byte >>> (6 - (bodyBit & 7))) & 3
+        : (byte >>> (4 - (bodyBit & 4))) & 15;
     }
-    const lum = LUMINANCE_LEVELS[level as 0 | 1 | 2 | 3];
+
+    const lum = levels[Math.min(level, levels.length - 1)];
     pixels[i] = lum;
     pixels[i + 1] = lum;
     pixels[i + 2] = lum;
     pixels[i + 3] = 255;
-    cursorBits += 2;
+    cursor += bitsPerCell;
   }
 
   return { width: OPTIFRAME_SIZE, height: OPTIFRAME_SIZE, pixels };
+}
+
+export function rasterizeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
+  return rasterizeOptiFrameWithDensity(payload, sequence, total, 2, HEADER_VERSION, LUMINANCE_LEVELS);
+}
+
+export function rasterizeOptiFrameDense4(payload: Uint8Array, sequence = 0, total = 1) {
+  return rasterizeOptiFrameWithDensity(payload, sequence, total, 4, DENSE4_VERSION, DENSE4_LUMINANCE_LEVELS);
 }
 
 export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
@@ -190,9 +218,19 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   canvas.height = raster.height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas unavailable.');
-  const image = new ImageData(raster.pixels, raster.width, raster.height);
-  ctx.putImageData(image, 0, 0);
+  ctx.putImageData(new ImageData(raster.pixels, raster.width, raster.height), 0, 0);
   return { canvas, frame: { version: HEADER_VERSION, sequence, total, payload } as OptiFrame };
+}
+
+export function encodeOptiFrameDense4(payload: Uint8Array, sequence = 0, total = 1) {
+  const raster = rasterizeOptiFrameDense4(payload, sequence, total);
+  const canvas = document.createElement('canvas');
+  canvas.width = raster.width;
+  canvas.height = raster.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas unavailable.');
+  ctx.putImageData(new ImageData(raster.pixels, raster.width, raster.height), 0, 0);
+  return { canvas, frame: { version: DENSE4_VERSION, sequence, total, payload } as OptiFrame };
 }
 
 function toImageData(source: CanvasImageSource | ImageData) {
