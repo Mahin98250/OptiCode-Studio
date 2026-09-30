@@ -275,6 +275,10 @@ export function Transfer() {
   const opticalGroupLastSeenRef=useRef(0);
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
+  // Parallel workers can finish out of order. Geometry must be monotonic in
+  // capture sequence or an older frame can visibly pull the lock backwards.
+  const opticalDecodeSequenceRef=useRef(0);
+  const opticalLatestGeometrySequenceRef=useRef(0);
   const feedbackVideoRef=useRef<HTMLVideoElement>(null);
   const feedbackStreamRef=useRef<MediaStream|null>(null);
   const feedbackReaderRef=useRef<ZxingReader|null>(null);
@@ -1883,35 +1887,44 @@ export function Transfer() {
         // symbol. Full-frame and multi-lane recovery still decode up to four codes.
         const maxSymbols=useTrackedRoi && !retainedGroup ? 1 : 4;
         const decodeDepth=misses>=8 || decoderCallsRef.current%6===0 ? 1 : 0;
+        const frameSequence=++opticalDecodeSequenceRef.current;
         const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth,maxSymbols);
         if(job){
           decoderCallsRef.current+=1;
           void job.then(async decoded=>{
             const processStarted=performance.now();
             qrDetectionsRef.current+=decoded.values.length;
-            const frameMetrics=estimateOpticalFrameMetrics(image);
-            if(decoded.values.length>0){
-              const scaleX=roiWidth/Math.max(1,width);
-              const scaleY=roiHeight/Math.max(1,height);
-              const guideBoxes=(decoded.boxes ?? []).map(box=>({
-                x:Math.floor(roiX+box.x*scaleX),
-                y:Math.floor(roiY+box.y*scaleY),
-                width:Math.max(1,Math.floor(box.width*scaleX)),
-                height:Math.max(1,Math.floor(box.height*scaleY)),
-                corners:box.corners?.map(point=>({x:roiX+point.x*scaleX,y:roiY+point.y*scaleY})),
-              }));
-              updateOpticalGuide(guideBoxes,sourceWidth,sourceHeight,true,frameMetrics);
-            }else{
-              updateOpticalGuide([],sourceWidth,sourceHeight,false,frameMetrics);
-            }
-            if(decoded.values.length>0){
-              lastDetectionRef.current=decoded.values[0].slice(0,48);
-              noDetectionDecodeCountRef.current=0;
-              decodeMaxDimensionRef.current=1120;
-            }else{
-              noDetectionDecodeCountRef.current+=1;
-              if(noDetectionDecodeCountRef.current>=12){
-                decodeMaxDimensionRef.current=720;
+
+            // Only the newest completed capture may move the optical guide. A
+            // result from an older parallel worker is still valid transport data,
+            // but its geometry is stale and would create visible backwards jumps.
+            const isNewestGeometry=frameSequence>=opticalLatestGeometrySequenceRef.current;
+            if(isNewestGeometry){
+              opticalLatestGeometrySequenceRef.current=frameSequence;
+              const frameMetrics=estimateOpticalFrameMetrics(image);
+              if(decoded.values.length>0){
+                const scaleX=roiWidth/Math.max(1,width);
+                const scaleY=roiHeight/Math.max(1,height);
+                const guideBoxes=(decoded.boxes ?? []).map(box=>({
+                  x:Math.floor(roiX+box.x*scaleX),
+                  y:Math.floor(roiY+box.y*scaleY),
+                  width:Math.max(1,Math.floor(box.width*scaleX)),
+                  height:Math.max(1,Math.floor(box.height*scaleY)),
+                  corners:box.corners?.map(point=>({x:roiX+point.x*scaleX,y:roiY+point.y*scaleY})),
+                }));
+                updateOpticalGuide(guideBoxes,sourceWidth,sourceHeight,true,frameMetrics);
+              }else{
+                updateOpticalGuide([],sourceWidth,sourceHeight,false,frameMetrics);
+              }
+              if(decoded.values.length>0){
+                lastDetectionRef.current=decoded.values[0].slice(0,48);
+                noDetectionDecodeCountRef.current=0;
+                decodeMaxDimensionRef.current=1120;
+              }else{
+                noDetectionDecodeCountRef.current+=1;
+                if(noDetectionDecodeCountRef.current>=12){
+                  decodeMaxDimensionRef.current=720;
+                }
               }
             }
 
@@ -1988,6 +2001,8 @@ export function Transfer() {
     cameraFramesRef.current=0;decoderCallsRef.current=0;qrDetectionsRef.current=0;acceptedTransferFramesRef.current=0;lastDetectionRef.current='—';telemetryTickRef.current=0;
     decodeMaxDimensionRef.current=1120;
     noDetectionDecodeCountRef.current=0;
+    opticalDecodeSequenceRef.current=0;
+    opticalLatestGeometrySequenceRef.current=0;
     nativeCallsRef.current=0;
     nativeInFlightRef.current=false;
     zxingCallsRef.current=0;
