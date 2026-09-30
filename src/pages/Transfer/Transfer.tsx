@@ -472,7 +472,7 @@ export function Transfer() {
                   setIntervalMs(v=>Math.max(16,v-10));
                 }
               }else if(fountainMode){
-                if(avgRender<14 && fps>18 && intervalMs>35)setIntervalMs(v=>Math.max(16,v-5));
+                if(avgRender<14 && fps>18 && intervalMs>16)setIntervalMs(v=>Math.max(16,v-5));
                 else if(avgRender>55 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+20));
               }
             }
