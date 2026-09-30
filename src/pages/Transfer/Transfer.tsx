@@ -82,7 +82,7 @@ export function Transfer() {
   const [playing,setPlaying]=useState(false);
   // Reliability-first physical MVP: each compatibility QR is displayed long
   // enough for a slow camera to acquire it, and compatibility playback repeats it.
-  const [intervalMs,setIntervalMs]=useState(90);
+  const [intervalMs,setIntervalMs]=useState(60);
   // Protect the final compatibility frame with an explicit acquisition tail.
   const FINAL_FRAME_EXTRA_DWELLS=3;
   const [error,setError]=useState('');
@@ -458,11 +458,11 @@ export function Transfer() {
                 const gaps=feedbackMissingSetRef.current.size;
                 if(gaps>0 || ackAge>1400){
                   if(intervalMs<1300)setIntervalMs(v=>Math.min(1300,v+50));
-                }else if(ackAge<900 && avgRender<22 && fps>18 && intervalMs>60){
-                  setIntervalMs(v=>Math.max(60,v-10));
+                }else if(ackAge<900 && avgRender<22 && fps>18 && intervalMs>35){
+                  setIntervalMs(v=>Math.max(35,v-10));
                 }
               }else if(fountainMode){
-                if(avgRender<14 && fps>18 && intervalMs>60)setIntervalMs(v=>Math.max(60,v-5));
+                if(avgRender<14 && fps>18 && intervalMs>35)setIntervalMs(v=>Math.max(35,v-5));
                 else if(avgRender>55 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+20));
               }
             }
@@ -1502,9 +1502,14 @@ export function Transfer() {
           await track.applyConstraints({advanced:[{focusMode:'continuous'}]} as unknown as MediaTrackConstraints).catch(()=>{});
         }
       }catch{}
-      await startZxingAssist();
-      await startNativeQrAssist();
-      startFallbackReading();
+      const nativeStarted=await startNativeQrAssist();
+      if(!nativeStarted){
+        // Use the deterministic worker decoder only when the browser has no
+        // native multi-QR detector. Running several full decoders at once
+        // wastes CPU and steals time from the camera pipeline.
+        await startZxingAssist();
+        startFallbackReading();
+      }
     }catch(e){
       stopReceive();
       setError(e instanceof Error?e.message:'Camera permission was denied.');
