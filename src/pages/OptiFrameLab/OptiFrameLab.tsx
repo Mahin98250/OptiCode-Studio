@@ -7,7 +7,7 @@ import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from '../../lib
 import { OptiFrameDecodePool } from '../../lib/optiframeDecodePool';
 import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
 import { createOptiFrameCanvasCache, createOptiLaneSurface, cropOptiLaneGrid, type OptiLaneCount } from '../../lib/optiframeLanes';
-import { createOptiCodeFileTransfer, decodeOptiCodeFileTransfer, type OptiCodeFileTransfer } from '../../lib/opticodeTransfer';
+import { decodeOptiCodeFileTransfer, type OptiCodeFileTransfer } from '../../lib/opticodeTransfer';
 import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_OVERHEAD, parseOpticalFountainFrame, type OpticalFountainPlan } from '../../lib/opticalFountain';
 
 type CameraStats = {
@@ -189,7 +189,7 @@ export function OptiFrameLab() {
       if (senderTimerRef.current !== null) window.clearInterval(senderTimerRef.current);
       senderTimerRef.current = null;
     };
-  }, [streamPlaying, streamPayload.length, laneCount, streamIntervalMs]);
+  }, [streamPlaying, streamFrameCount, laneCount, streamIntervalMs]);
 
   const streamSurface = useMemo(() => {
     try {
@@ -788,7 +788,6 @@ export function OptiFrameLab() {
       const elapsedFromStart = cameraStats.startedAt
         ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000)
         : 0;
-      const duplicate = fountainFastPath.duplicateCount > 0;
       setCameraStats(prev => ({
         ...prev,
         duplicates: prev.duplicates + fountainFastPath.duplicateCount,
@@ -877,7 +876,7 @@ export function OptiFrameLab() {
           const cameraConstraints: OptiVideoTrackConstraints = {
             width: { ideal: Math.min(1920, capabilities.width?.max ?? 1920) },
             height: { ideal: Math.min(1080, capabilities.height?.max ?? 1080) },
-            frameRate: { ideal: Math.min(30, capabilities.frameRate?.max ?? 30) },
+            frameRate: { ideal: Math.min(60, capabilities.frameRate?.max ?? 60), max: Math.min(60, capabilities.frameRate?.max ?? 60) },
           };
           if (Array.isArray(resizeModes) && resizeModes.includes('none')) {
             cameraConstraints.resizeMode = 'none';
@@ -984,7 +983,7 @@ export function OptiFrameLab() {
           <h1 className="mt-2 text-4xl font-black text-[var(--text)] sm:text-6xl">Share files using your screen.</h1>
           <p className="mt-4 max-w-4xl text-sm leading-7 text-[var(--text-muted)]">Choose a file, show it on this screen, and use another device to receive it. Advanced test controls are below.</p>
         </div>
-        <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-300">{capacity} data per screen</div>
+        <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-300">{capacity} bytes/frame · 2-bit optical</div>
       </div>
 
       <GlassCard>
@@ -1070,7 +1069,7 @@ export function OptiFrameLab() {
             <button onClick={() => setStreamIndex(index => (index + streamFrameCount - laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Previous</button>
             <button onClick={() => setStreamIndex(index => (index + laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Next</button>
           </div>
-          <p className="mt-3 text-xs text-[var(--text-muted)]">{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${laneCount === 2 ? '2:1' : '1:1'} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
+          <p className="mt-3 text-xs text-[var(--text-muted)]">{transferFile ? 'High-speed file mode uses binary fountain packets directly inside each OptiFrame. Increase the lane count on both devices for higher physical throughput; actual goodput depends on screen refresh, camera exposure, focus and decoder latency. ' : ''}{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${laneCount === 2 ? '2:1' : '1:1'} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
         </GlassCard>
       </div>
 
