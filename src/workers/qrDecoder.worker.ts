@@ -18,7 +18,8 @@ type DecodeRequest = {
   maxDepth?:number;
 };
 
-type DecodeBox = { x:number; y:number; width:number; height:number };
+type DecodePoint = { x:number; y:number };
+type DecodeBox = { x:number; y:number; width:number; height:number; corners?:DecodePoint[] };
 
 type DecodeResult = {
   id:number;
@@ -50,6 +51,9 @@ function boxFromPosition(position:unknown):DecodeBox|undefined{
     y:Math.max(0,Math.min(...ys)),
     width:Math.max(1,Math.max(...xs)-Math.min(...xs)),
     height:Math.max(1,Math.max(...ys)-Math.min(...ys)),
+    corners:[p.topLeft!,p.topRight!,p.bottomRight!,p.bottomLeft!].filter(point=>
+      point && Number.isFinite(point.x) && Number.isFinite(point.y)
+    ),
   };
 }
 
@@ -131,6 +135,9 @@ async function decode(request:DecodeRequest):Promise<DecodeResult>{
           y:Math.max(0,Math.min(...ys)),
           width:Math.max(1,Math.max(...xs)-Math.min(...xs)),
           height:Math.max(1,Math.max(...ys)-Math.min(...ys)),
+          corners:[location.topLeftCorner!,location.topRightCorner!,location.bottomRightCorner!,location.bottomLeftCorner!].filter(point=>
+            point && Number.isFinite(point.x) && Number.isFinite(point.y)
+          ),
         });
       }
     }
