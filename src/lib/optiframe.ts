@@ -263,7 +263,11 @@ function quantize(v: number) {
   return v < 43 ? 0 : v < 128 ? 1 : v < 213 ? 2 : 3;
 }
 
-function decodePackedFrame(packed: Uint8Array) {
+function decodePackedFrameWithConfig(
+  packed: Uint8Array,
+  expectedVersion: number,
+  maxPayload: number,
+) {
   if (packed.length < 9 + 4) return null;
 
   const magic = (packed[0] << 8) | packed[1];
@@ -271,7 +275,7 @@ function decodePackedFrame(packed: Uint8Array) {
   const sequence = ((packed[2] & 0x0f) << 12) | (packed[3] << 4) | (packed[4] >>> 4);
   const total = ((packed[4] & 0x0f) << 12) | (packed[5] << 4) | (packed[6] >>> 4);
   const length = ((packed[6] & 0x0f) << 12) | (packed[7] << 4) | (packed[8] >>> 4);
-  if (magic !== MAGIC || version !== HEADER_VERSION || total < 1 || length > OPTIFRAME_MAX_PAYLOAD) return null;
+  if (magic !== MAGIC || version !== expectedVersion || total < 1 || length > maxPayload) return null;
 
   const payloadStart = 9;
   const end = payloadStart + length + 4;
@@ -287,29 +291,76 @@ function decodePackedFrame(packed: Uint8Array) {
   return { version, sequence, total, payload } as OptiFrame;
 }
 
-function decodeAxisAlignedImage(image: ImageData) {
+function decodePackedFrame(packed: Uint8Array) {
+  return decodePackedFrameWithConfig(packed, HEADER_VERSION, OPTIFRAME_MAX_PAYLOAD);
+}
+
+function packCellsIntoBytes(
+  image: ImageData,
+  bitsPerCell: OptiFrameDensity,
+  quantizer: (value: number) => number,
+  expectedVersion: number,
+  maxPayload: number,
+) {
   if (image.width !== OPTIFRAME_SIZE || image.height !== OPTIFRAME_SIZE) return null;
-  const packed = new Uint8Array(9 + Math.ceil((capacityBits() + 7) / 8));
+  const packed = new Uint8Array(9 + Math.ceil((capacityBits(bitsPerCell) + 7) / 8));
   let cursorBits = 0;
+
   for (const coord of DATA_CELL_COORDS) {
     const r = coord >>> 8;
     const col = coord & 255;
     const i = (r * OPTIFRAME_SIZE + col) * 4;
-    const level = quantize((image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3);
+    const value = (image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3;
+    const level = quantizer(value);
     const byteIndex = cursorBits >>> 3;
-    packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
-    cursorBits += 2;
+
+    if (bitsPerCell === 2) {
+      packed[byteIndex] = ((packed[byteIndex] << 2) | (level & 3)) & 255;
+    } else if ((cursorBits & 7) === 0) {
+      packed[byteIndex] = (level & 15) << 4;
+    } else {
+      packed[byteIndex] |= level & 15;
+    }
+
+    cursorBits += bitsPerCell;
   }
-  return decodePackedFrame(packed);
+
+  return decodePackedFrameWithConfig(packed, expectedVersion, maxPayload);
 }
 
-export function decodeOptiFrame(source: CanvasImageSource | ImageData) {
+function quantizeDense4(value: number) {
+  return Math.max(0, Math.min(15, Math.round(Math.max(0, Math.min(255, value)) * 15 / 255)));
+}
+
+function decodeAxisAlignedImage(image: ImageData) {
+  return packCellsIntoBytes(
+    image,
+    2,
+    quantize,
+    HEADER_VERSION,
+    OPTIFRAME_MAX_PAYLOAD,
+  );
+}
+
+function decodeAxisAlignedImageDense4(image: ImageData) {
+  return packCellsIntoBytes(
+    image,
+    4,
+    quantizeDense4,
+    DENSE4_VERSION,
+    getOptiFrameDense4Capacity(),
+  );
+}
+
+function decodeFixedDensityImage(
+  source: CanvasImageSource | ImageData,
+  decode: (image: ImageData) => OptiFrame | null,
+) {
   const canvas = document.createElement('canvas');
   canvas.width = OPTIFRAME_SIZE;
   canvas.height = OPTIFRAME_SIZE;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
-  // Preserve the four discrete luminance levels when decoding a scaled image.
   ctx.imageSmoothingEnabled = false;
 
   if (source instanceof ImageData) {
@@ -318,7 +369,15 @@ export function decodeOptiFrame(source: CanvasImageSource | ImageData) {
   } else {
     ctx.drawImage(source, 0, 0, OPTIFRAME_SIZE, OPTIFRAME_SIZE);
   }
-  return decodeAxisAlignedImage(ctx.getImageData(0, 0, OPTIFRAME_SIZE, OPTIFRAME_SIZE));
+  return decode(ctx.getImageData(0, 0, OPTIFRAME_SIZE, OPTIFRAME_SIZE));
+}
+
+export function decodeOptiFrame(source: CanvasImageSource | ImageData) {
+  return decodeFixedDensityImage(source, decodeAxisAlignedImage);
+}
+
+export function decodeOptiFrameDense4(source: CanvasImageSource | ImageData) {
+  return decodeFixedDensityImage(source, decodeAxisAlignedImageDense4);
 }
 
 function bilinear(image: ImageData, x: number, y: number) {
@@ -679,7 +738,13 @@ function searchFinderNear(image: ImageData, previous: OptiFrameAnchor) {
   return best && best.score >= 0.68 ? best : null;
 }
 
-function decodePerspectiveFromAnchors(image: ImageData, anchors: PerspectiveAnchorSet) {
+function decodePerspectiveFromAnchors(
+  image: ImageData,
+  anchors: PerspectiveAnchorSet,
+  bitsPerCell: OptiFrameDensity = 2,
+  expectedVersion = HEADER_VERSION,
+  maxPayload = OPTIFRAME_MAX_PAYLOAD,
+) {
   const edge = OPTIFRAME_SIZE - 9;
   const target: Array<[number, number]> = [[8, 8], [edge, 8], [8, edge], [edge, edge]];
   const homography = solveHomography(anchors.map(anchor => [anchor.x, anchor.y]), target);
@@ -699,21 +764,27 @@ function decodePerspectiveFromAnchors(image: ImageData, anchors: PerspectiveAnch
   const shortest = Math.max(1, Math.min(topWidth, bottomWidth, leftHeight, rightHeight));
   if (longest / shortest > 2.75) return null;
 
-  const packed = new Uint8Array(9 + Math.ceil((capacityBits() + 7) / 8));
+  const packed = new Uint8Array(9 + Math.ceil((capacityBits(bitsPerCell) + 7) / 8));
   let cursorBits = 0;
   for (const coord of DATA_CELL_COORDS) {
     const r = coord >>> 8;
     const col = coord & 255;
     const [sx, sy] = project(reverse, col, r);
-      if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) return null;
-      const raw = sampleModule(image, sx, sy, moduleScale);
-      const normalized = Math.max(0, Math.min(255, (raw - calibration.dark) * 255 / (calibration.light - calibration.dark)));
-      const level = quantize(normalized);
-      const byteIndex = cursorBits >>> 3;
+    if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) return null;
+    const raw = sampleModule(image, sx, sy, moduleScale);
+    const normalized = Math.max(0, Math.min(255, (raw - calibration.dark) * 255 / (calibration.light - calibration.dark)));
+    const level = bitsPerCell === 2 ? quantize(normalized) : quantizeDense4(normalized);
+    const byteIndex = cursorBits >>> 3;
+    if (bitsPerCell === 2) {
       packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
-      cursorBits += 2;
+    } else if ((cursorBits & 7) === 0) {
+      packed[byteIndex] = (level & 15) << 4;
+    } else {
+      packed[byteIndex] |= level & 15;
     }
-  return decodePackedFrame(packed);
+    cursorBits += bitsPerCell;
+  }
+  return decodePackedFrameWithConfig(packed, expectedVersion, maxPayload);
 }
 
 function solveHomography(
@@ -851,21 +922,22 @@ export function inspectOptiFrameAcquisition(source: CanvasImageSource | ImageDat
   return { stage: 'ready', anchors: found, confidence, moduleScale, angle, geometryRatio, sampleWidth: image.width, sampleHeight: image.height, elapsedMs: performance.now() - started };
 }
 
-export function decodeOptiFramePerspective(
+function decodePerspectiveDensity(
   source: CanvasImageSource | ImageData,
-  previousAnchors: PerspectiveAnchorSet | null = null,
+  previousAnchors: PerspectiveAnchorSet | null,
+  bitsPerCell: OptiFrameDensity,
+  expectedVersion: number,
+  maxPayload: number,
 ): { frame: OptiFrame; diagnostics: OptiFramePerspectiveDiagnostics } | null {
   const started = performance.now();
   const image = toImageData(source);
   if (!image) return null;
 
-  // Fast tracking path: search each known finder in a tiny neighborhood first.
-  // The caller owns the state, so workers no longer cross-contaminate lanes.
   if (previousAnchors) {
-    const tracked = previousAnchors.map((anchor) => searchFinderNear(image, anchor));
+    const tracked = previousAnchors.map(anchor => searchFinderNear(image, anchor));
     if (tracked.every(Boolean)) {
       const anchors: PerspectiveAnchorSet = [tracked[0]!, tracked[1]!, tracked[2]!, tracked[3]!];
-      const frame = decodePerspectiveFromAnchors(image, anchors);
+      const frame = decodePerspectiveFromAnchors(image, anchors, bitsPerCell, expectedVersion, maxPayload);
       if (frame) {
         return {
           frame,
@@ -881,12 +953,11 @@ export function decodeOptiFramePerspective(
     }
   }
 
-  // Full acquisition fallback is required for first lock and after tracker loss.
   const all = searchAllFinders(image);
   if (!all.tl || !all.tr || !all.bl || !all.br) return null;
 
   const anchors: PerspectiveAnchorSet = [all.tl, all.tr, all.bl, all.br];
-  const frame = decodePerspectiveFromAnchors(image, anchors);
+  const frame = decodePerspectiveFromAnchors(image, anchors, bitsPerCell, expectedVersion, maxPayload);
   if (!frame) return null;
 
   return {
@@ -899,6 +970,32 @@ export function decodeOptiFramePerspective(
       decodeMs: performance.now() - started,
     },
   };
+}
+
+export function decodeOptiFramePerspective(
+  source: CanvasImageSource | ImageData,
+  previousAnchors: PerspectiveAnchorSet | null = null,
+): { frame: OptiFrame; diagnostics: OptiFramePerspectiveDiagnostics } | null {
+  return decodePerspectiveDensity(
+    source,
+    previousAnchors,
+    2,
+    HEADER_VERSION,
+    OPTIFRAME_MAX_PAYLOAD,
+  );
+}
+
+export function decodeOptiFramePerspectiveDense4(
+  source: CanvasImageSource | ImageData,
+  previousAnchors: PerspectiveAnchorSet | null = null,
+): { frame: OptiFrame; diagnostics: OptiFramePerspectiveDiagnostics } | null {
+  return decodePerspectiveDensity(
+    source,
+    previousAnchors,
+    4,
+    DENSE4_VERSION,
+    getOptiFrameDense4Capacity(),
+  );
 }
 
 export function optiFrameSelfTest() {
