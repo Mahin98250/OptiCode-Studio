@@ -1401,7 +1401,6 @@ export function Transfer() {
         opticalGroupBoxRef.current=null;
       }
       const confirmed=guideDetectionStreakRef.current>=3;
-      const confirmed=guideDetectionStreakRef.current>=3;
       opticalTrackRef.current={...next,confirmed};
       setOpticalTrack({confidence:next.confidence,predicted:false,ageMs:0});
       lastGuideBoxRef.current=primary;
@@ -1545,6 +1544,8 @@ export function Transfer() {
     guideDetectionStreakRef.current=0;
     guideMissStreakRef.current=Math.min(8,guideMissStreakRef.current);
     opticalTrackRef.current=null;
+    opticalGroupBoxRef.current=null;
+    opticalGroupLastSeenRef.current=0;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideRect(null);
     guideDistanceRef.current='unknown';
@@ -1784,62 +1785,99 @@ export function Transfer() {
       }
 
       if(sourceWidth && sourceHeight){
-        // Baseline: decode the complete camera image at a moderate resolution.
-        // Missed parts: after repeated misses, every other sample is a centered square
-        // crop. The sender renders a square QR, while many phone camera streams are
-        // 16:9, so the crop concentrates pixels on the optical payload.
+        // Hot path: once a QR is confirmed, decode a predicted local ROI instead
+        // of repeatedly scanning the entire camera frame. This is the key speed
+        // path for optical transport: fewer pixels, fewer cache misses, same QR
+        // module resolution. A periodic full-frame probe keeps reacquisition safe.
         const misses=noDetectionDecodeCountRef.current;
-        // Compatibility MVP always displays one large centered square QR.
-        // Decode that optical ROI first at 720px. The old 1120px full-frame
-        // baseline made jsQR spend ~1.3s on a single acquisition on this phone.
-        // A smaller centered ROI reduces pixel work while preserving the QR's
-        // module resolution. Full-frame recovery is deliberately occasional.
-        const useCenterRecovery=misses%4!==3;
 
+        // Never spend canvas time preparing a frame while every worker is busy.
+        // With requestVideoFrameCallback this is a common case on slower phones.
+        if(qrPoolRef.current.available<0){
+          fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(16,Math.min(36,scanDelayRef.current)));
+          return;
+        }
+
+        const track=opticalTrackRef.current;
+        const trackAge=track ? performance.now()-track.lastSeenAt : Infinity;
+        const canUseTrackedRoi=Boolean(track?.confirmed && trackAge<450 && track.misses<=2);
+        const periodicFullRecovery=decoderCallsRef.current>0 && decoderCallsRef.current%8===0;
+        const useTrackedRoi=canUseTrackedRoi && !periodicFullRecovery && misses<4;
+        const retainedGroup=opticalGroupBoxRef.current && performance.now()-opticalGroupLastSeenRef.current<1600
+          ? opticalGroupBoxRef.current
+          : null;
+
+        let roiX=0;
+        let roiY=0;
+        let roiWidth=sourceWidth;
+        let roiHeight=sourceHeight;
         let image:ImageData;
-        let width:number;
-        let height:number;
+        let width=0;
+        let height=0;
 
-        if(useCenterRecovery){
+        if(useTrackedRoi){
+          const base=retainedGroup ?? track!.box;
+          const predictMs=Math.min(100,Math.max(0,trackAge));
+          const predictedX=base.x+(retainedGroup ? 0 : track!.vx*predictMs);
+          const predictedY=base.y+(retainedGroup ? 0 : track!.vy*predictMs);
+          const predictedW=Math.max(12,base.width+(retainedGroup ? 0 : track!.vw*predictMs));
+          const predictedH=Math.max(12,base.height+(retainedGroup ? 0 : track!.vh*predictMs));
+          // Motion padding grows with estimated camera velocity so a fast pan does
+          // not outrun the ROI. The minimum border also protects perspective corners.
+          const motionPadX=Math.max(28,Math.abs(track!.vx)*90);
+          const motionPadY=Math.max(28,Math.abs(track!.vy)*90);
+          const margin=retainedGroup?.width && retainedGroup.width>sourceWidth*.5 ? .20 : .42;
+          roiX=Math.max(0,Math.floor(predictedX-predictedW*margin-motionPadX));
+          roiY=Math.max(0,Math.floor(predictedY-predictedH*margin-motionPadY));
+          const right=Math.min(sourceWidth,Math.ceil(predictedX+predictedW*(1+margin)+motionPadX));
+          const bottom=Math.min(sourceHeight,Math.ceil(predictedY+predictedH*(1+margin)+motionPadY));
+          roiWidth=Math.max(16,right-roiX);
+          roiHeight=Math.max(16,bottom-roiY);
+          const target=720;
+          const scale=Math.min(1,target/Math.max(roiWidth,roiHeight));
+          width=Math.max(1,Math.round(roiWidth*scale));
+          height=Math.max(1,Math.round(roiHeight*scale));
+          if(recoveryCanvas.width!==width)recoveryCanvas.width=width;
+          if(recoveryCanvas.height!==height)recoveryCanvas.height=height;
+          recoveryCtx.imageSmoothingEnabled=false;
+          recoveryCtx.drawImage(video,roiX,roiY,roiWidth,roiHeight,0,0,width,height);
+          image=recoveryCtx.getImageData(0,0,width,height);
+        }else if(misses%4!==3){
+          // Acquisition mode: center crop exploits the square QR geometry while
+          // keeping the first lock cheap. The 4th sample is full-frame recovery.
           const cropSize=Math.min(sourceWidth,sourceHeight);
           const target=720;
           const scale=Math.min(1,target/cropSize);
           width=Math.max(1,Math.round(cropSize*scale));
           height=width;
+          roiX=Math.floor((sourceWidth-cropSize)/2);
+          roiY=Math.floor((sourceHeight-cropSize)/2);
+          roiWidth=cropSize;
+          roiHeight=cropSize;
           if(recoveryCanvas.width!==width)recoveryCanvas.width=width;
           if(recoveryCanvas.height!==height)recoveryCanvas.height=height;
-          // QR modules are hard-edged geometry. Do not blur them while
-          // reducing the camera frame into the acquisition ROI.
           recoveryCtx.imageSmoothingEnabled=false;
-          const sx=Math.floor((sourceWidth-cropSize)/2);
-          const sy=Math.floor((sourceHeight-cropSize)/2);
-          recoveryCtx.drawImage(video,sx,sy,cropSize,cropSize,0,0,width,height);
+          recoveryCtx.drawImage(video,roiX,roiY,roiWidth,roiHeight,0,0,width,height);
           image=recoveryCtx.getImageData(0,0,width,height);
         }else{
-          // Keep occasional full-frame recovery bounded as well. This path
-          // exists for alignment/off-center recovery, not as the hot path.
+          // Full-frame recovery is deliberately bounded to ~720 px on the hot path.
           const maxDimension=Math.min(720,decodeMaxDimensionRef.current);
           const scale=Math.min(1,maxDimension/Math.max(sourceWidth,sourceHeight));
           width=Math.max(1,Math.round(sourceWidth*scale));
           height=Math.max(1,Math.round(sourceHeight*scale));
           if(canvas.width!==width)canvas.width=width;
           if(canvas.height!==height)canvas.height=height;
+          roiX=0; roiY=0; roiWidth=sourceWidth; roiHeight=sourceHeight;
           ctx.imageSmoothingEnabled=false;
           ctx.drawImage(video,0,0,width,height);
           image=ctx.getImageData(0,0,width,height);
         }
 
-        // Do not serialize camera capture behind a slow QR decode. The single
-        // MVP worker stays deterministic; skipped busy samples are retried on the
-        // next camera tick rather than queueing stale frames.
-        if(qrPoolRef.current.available<0){
-          fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(18,Math.min(40,scanDelayRef.current)));
-          return;
-        }
-        // Keep the normal acquisition job to ONE jsQR pass. Quadrant recovery
-        // is a last-resort mode after sustained misses, not the default path.
-        const decodeDepth=misses>=8 || cameraFramesRef.current%6===0 ? 1 : 0;
-        const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth);
+        // A single-code tracked ROI can ask ZXing to stop after its first valid
+        // symbol. Full-frame and multi-lane recovery still decode up to four codes.
+        const maxSymbols=useTrackedRoi && !retainedGroup ? 1 : 4;
+        const decodeDepth=misses>=8 || decoderCallsRef.current%6===0 ? 1 : 0;
+        const job=qrPoolRef.current.decode(image.data.buffer,width,height,decodeDepth,maxSymbols);
         if(job){
           decoderCallsRef.current+=1;
           void job.then(async decoded=>{
@@ -1847,28 +1885,15 @@ export function Transfer() {
             qrDetectionsRef.current+=decoded.values.length;
             const frameMetrics=estimateOpticalFrameMetrics(image);
             if(decoded.values.length>0){
-              const guideBoxes=(decoded.boxes ?? []).map(box=>useCenterRecovery
-                ? (()=>{
-                    const cropSize=Math.min(sourceWidth,sourceHeight);
-                    const offsetX=(sourceWidth-cropSize)/2;
-                    const offsetY=(sourceHeight-cropSize)/2;
-                    const scaleX=cropSize/Math.max(1,width);
-                    const scaleY=cropSize/Math.max(1,height);
-                    return {
-                      x:Math.floor(offsetX+box.x*scaleX),
-                      y:Math.floor(offsetY+box.y*scaleY),
-                      width:Math.max(1,Math.floor(box.width*scaleX)),
-                      height:Math.max(1,Math.floor(box.height*scaleY)),
-                      corners:box.corners?.map(point=>({x:offsetX+point.x*scaleX,y:offsetY+point.y*scaleY})),
-                    };
-                  })()
-                : {
-                    x:Math.floor((box.x/Math.max(1,width))*sourceWidth),
-                    y:Math.floor((box.y/Math.max(1,height))*sourceHeight),
-                    width:Math.max(1,Math.floor((box.width/Math.max(1,width))*sourceWidth)),
-                    height:Math.max(1,Math.floor((box.height/Math.max(1,height))*sourceHeight)),
-                    corners:box.corners?.map(point=>({x:(point.x/Math.max(1,width))*sourceWidth,y:(point.y/Math.max(1,height))*sourceHeight})),
-                  });
+              const scaleX=roiWidth/Math.max(1,width);
+              const scaleY=roiHeight/Math.max(1,height);
+              const guideBoxes=(decoded.boxes ?? []).map(box=>({
+                x:Math.floor(roiX+box.x*scaleX),
+                y:Math.floor(roiY+box.y*scaleY),
+                width:Math.max(1,Math.floor(box.width*scaleX)),
+                height:Math.max(1,Math.floor(box.height*scaleY)),
+                corners:box.corners?.map(point=>({x:roiX+point.x*scaleX,y:roiY+point.y*scaleY})),
+              }));
               updateOpticalGuide(guideBoxes,sourceWidth,sourceHeight,true,frameMetrics);
             }else{
               updateOpticalGuide([],sourceWidth,sourceHeight,false,frameMetrics);
