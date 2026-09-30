@@ -18,6 +18,7 @@ import {
   reconstructMultiImage,
 } from './imageQr';
 import { estimateOpticalSpeed, frameGenerationCeiling } from './opticalSpeedLab';
+import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_BLOCK_BYTES, OPTICAL_FOUNTAIN_OVERHEAD, parseOpticalFountainFrame } from './opticalFountain';
 import {
   OR_TRANSFER_CHUNK_CHARS,
   addTransferFrame,
@@ -685,6 +686,87 @@ async function optiFrameMultiLaneRoundTrip() {
   return '1×, 2×, and 4× lane surfaces cropped/decoded · bounded encoded-frame cache reuse verified';
 }
 
+async function opticalFountainRoundTripDiagnostic() {
+  const original = makeBytes(210_000, 187);
+  const file = new File([original], 'diagnostic-optical-fountain.bin', { type: 'application/octet-stream' });
+  const plan = await createOpticalFountainTransfer(file);
+
+  assert(plan.blockBytes === OPTICAL_FOUNTAIN_BLOCK_BYTES, 'Optical fountain block-size contract mismatch.');
+  assert(plan.blockBytes === 3_872, 'Optical fountain did not fill the 3,900-byte OptiFrame payload budget after its binary header.');
+  assert(plan.totalBlocks === Math.ceil(file.size / plan.blockBytes), 'Optical fountain block count mismatch.');
+
+  const groups = Math.max(
+    1,
+    Math.ceil((plan.totalBlocks + Math.ceil(plan.totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD)) / 4),
+  );
+  const decoder = new OpticalFountainDecoder();
+  let observed = 0;
+
+  for (let group = 0; group < groups; group += 1) {
+    for (let lane = 0; lane < 4; lane += 1) {
+      const packet = plan.getFrame(lane, group, 4);
+      assert(packet.byteLength <= 3_900, 'Optical fountain packet exceeded OptiFrame payload capacity.');
+      const parsed = parseOpticalFountainFrame(packet);
+      assert(parsed, 'Optical fountain packet failed to parse at group ' + group + ', lane ' + lane + '.');
+      const result = decoder.add(parsed);
+      observed += 1;
+      if (result.complete) break;
+    }
+    if (decoder.snapshot().complete) break;
+  }
+
+  const rebuilt = await decoder.reconstruct();
+  assert(rebuilt, 'Optical fountain did not reconstruct after complete systematic/coded transmission.');
+  expectEqualBytes(rebuilt.bytes, original, 'Optical fountain round trip');
+  assert(rebuilt.hash === plan.hash, 'Optical fountain SHA-256 mismatch.');
+  return observed + ' binary packets · ' + plan.totalBlocks + ' source blocks · 3,872-byte blocks · complete SHA-256 verified';
+}
+
+async function opticalFountainLossRecoveryDiagnostic() {
+  const original = makeBytes(180_000, 73);
+  const file = new File([original], 'diagnostic-optical-fountain-loss.bin', { type: 'application/octet-stream' });
+  const plan = await createOpticalFountainTransfer(file);
+  const groupsPerPass = Math.max(
+    1,
+    Math.ceil((plan.totalBlocks + Math.ceil(plan.totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD)) / 4),
+  );
+
+  const packets: ReturnType<typeof parseOpticalFountainFrame>[] = [];
+  const passes = 2;
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (let group = 0; group < groupsPerPass; group += 1) {
+      for (let lane = 0; lane < 4; lane += 1) {
+        const parsed = parseOpticalFountainFrame(plan.getFrame(lane, group + pass * groupsPerPass, 4));
+        assert(parsed, 'Loss-recovery packet did not parse.');
+        // Deterministic channel model: discard about 18% of packets, preserve
+        // late join/out-of-order behavior by shuffling delivery afterwards.
+        const ordinal = pass * groupsPerPass * 4 + group * 4 + lane;
+        if ((ordinal * 37 + 19) % 50 >= 9) packets.push(parsed);
+      }
+    }
+  }
+
+  const delivery = packets.sort((a, b) => {
+    const av = (a!.kind === 'data' ? a.seed : 0) >>> 0;
+    const bv = (b!.kind === 'data' ? b.seed : 0) >>> 0;
+    return ((av ^ (av >>> 16)) - (bv ^ (bv >>> 16)));
+  });
+
+  const decoder = new OpticalFountainDecoder();
+  let duplicates = 0;
+  for (const frame of delivery) {
+    const result = decoder.add(frame!);
+    if (result.duplicate) duplicates += 1;
+    if (result.complete) break;
+  }
+
+  const rebuilt = await decoder.reconstruct();
+  assert(rebuilt, 'Optical fountain failed deterministic lossy recovery.');
+  expectEqualBytes(rebuilt.bytes, original, 'Optical fountain lossy recovery');
+  assert(rebuilt.hash === plan.hash, 'Optical fountain lossy SHA-256 mismatch.');
+  return delivery.length + ' delivered packets · ~18% deterministic packet loss · out-of-order delivery · ' + duplicates + ' duplicate(s) · recovered exactly';
+}
+
 async function adaptiveTransmissionDiagnostic() {
   const controller = createAdaptiveTransmission(80, {
     minIntervalMs: 16,
@@ -953,6 +1035,8 @@ export async function runProtocolDiagnostics(
     ['Performance · exact ORX1 QR frame', qrTransferFrameWorkerDiagnostic],
     ['Performance · exact ORF2 fountain QR frame', qrFountainFrameWorkerDiagnostic],
     ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
+    ['OptiFrame · binary fountain round trip', opticalFountainRoundTripDiagnostic],
+    ['OptiFrame · binary fountain loss recovery', opticalFountainLossRecoveryDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
       return r.payloadBytes + ' payload bytes · ' + r.capacityBytes + ' byte capacity · CRC-32 verified';
