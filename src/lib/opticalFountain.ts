@@ -382,24 +382,29 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
   const totalBlocks = Math.max(1, Math.ceil(file.size / OPTICAL_FOUNTAIN_BLOCK_BYTES));
   const degreeCdf = robustSolitonCdf(totalBlocks);
 
+  const recommendedPackets = Math.max(
+    totalBlocks + 4,
+    Math.ceil(totalBlocks * (1 + OPTICAL_FOUNTAIN_OVERHEAD)),
+  );
+
+  const getCycleGroups = (laneCount: 1 | 2 | 4 | 6 = 4) => {
+    const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 ? laneCount : 4;
+    return Math.max(1, Math.ceil(recommendedPackets / activeLanes));
+  };
+
   const getFrame = (lane = 0, group = 0, laneCount: 1 | 2 | 4 | 6 = 4) => {
     const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 ? laneCount : 4;
     const normalizedLane = ((lane % activeLanes) + activeLanes) % activeLanes;
     const normalizedGroup = Math.max(0, Math.floor(group));
-    const slot = normalizedGroup * activeLanes + normalizedLane;
+    const groupsPerCycle = getCycleGroups(activeLanes);
+    const cycleIndex = Math.floor(normalizedGroup / groupsPerCycle);
+    const groupInCycle = normalizedGroup % groupsPerCycle;
+    const cyclePacketCount = groupsPerCycle * activeLanes;
+    const slot = groupInCycle * activeLanes + normalizedLane;
 
-    // Publish metadata during the coded tail instead of replacing a
-    // systematic source block. That preserves the full source pass while still
-    // giving late receivers a periodic way to learn filename/type/hash.
-    const firstCodedGroup = Math.floor(totalBlocks / activeLanes);
-    if (
-      normalizedLane === 0 &&
-      slot >= totalBlocks &&
-      (normalizedGroup - firstCodedGroup) % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0
-    ) {
-      return createMetaPacket(sessionBytes, file.size, totalBlocks, OPTICAL_FOUNTAIN_BLOCK_BYTES, digest, nameBytes, mimeBytes);
-    }
-
+    // Every cycle starts with the same systematic source sweep so a receiver
+    // can join at any time. The repair tail gets fresh deterministic droplets
+    // on every cycle instead of replaying the same repair groups forever.
     const systematic = slot < totalBlocks;
     let seed: number;
     let degree: number;
@@ -407,10 +412,19 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
       seed = (SYSTEMATIC_MASK | slot) >>> 0;
       degree = 1;
     } else {
-      const codeSlot = slot - totalBlocks;
-      seed = (Math.imul(codeSlot & RANDOM_MASK, 0x45d9f3b) ^ (sessionSeed & RANDOM_MASK)) & RANDOM_MASK;
+      const repairOrdinal = cycleIndex * Math.max(1, cyclePacketCount - totalBlocks) + (slot - totalBlocks);
+      seed = (Math.imul(repairOrdinal & RANDOM_MASK, 0x45d9f3b) ^ (sessionSeed & RANDOM_MASK)) & RANDOM_MASK;
       if (seed === 0) seed = 0x1f123bb5;
       degree = degreeFromSeed(seed, totalBlocks, degreeCdf);
+
+      // Sparse metadata refreshes share the repair tail and never replace a
+      // systematic source block. This keeps late joiners self-describing.
+      if (
+        normalizedLane === 0 &&
+        (slot - totalBlocks) % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0
+      ) {
+        return createMetaPacket(sessionBytes, file.size, totalBlocks, OPTICAL_FOUNTAIN_BLOCK_BYTES, digest, nameBytes, mimeBytes);
+      }
     }
 
     const payload = new Uint8Array(OPTICAL_FOUNTAIN_BLOCK_BYTES);
@@ -425,15 +439,6 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
     }
 
     return createDataPacket(sessionBytes, totalBlocks, OPTICAL_FOUNTAIN_BLOCK_BYTES, seed, degree, payload);
-  };
-
-  const recommendedPackets = Math.max(
-    totalBlocks + 4,
-    Math.ceil(totalBlocks * (1 + OPTICAL_FOUNTAIN_OVERHEAD)),
-  );
-  const getCycleGroups = (laneCount: 1 | 2 | 4 | 6 = 4) => {
-    const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 ? laneCount : 4;
-    return Math.max(1, Math.ceil(recommendedPackets / activeLanes));
   };
 
   return {
