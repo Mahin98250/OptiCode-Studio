@@ -35,12 +35,12 @@ export class OptiFrameDecodePool {
   private nextId = 1;
 
   constructor(
-    size = Math.min(4, Math.max(1, (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2) - 1)),
+    size = Math.min(8, Math.max(1, (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2) - 1)),
     enabled = typeof Worker !== 'undefined',
   ) {
     if (!enabled) return;
 
-    const count = Math.max(0, Math.min(4, Math.floor(size)));
+    const count = Math.max(0, Math.min(8, Math.floor(size)));
     for (let index = 0; index < count; index += 1) {
       try {
         const worker = new Worker(
