@@ -144,7 +144,7 @@ export function Navbar() {
                   <motion.span
                     layoutId="mobile-nav-liquid-capsule"
                     className={`nav-liquid-capsule absolute inset-y-0 left-0 right-0 rounded-full ${tone}`}
-                    transition={springTransition}
+                    transition={capsuleTransition}
                   >
                     <span className="nav-liquid-aura" />
                     <span className="nav-liquid-surface" />
