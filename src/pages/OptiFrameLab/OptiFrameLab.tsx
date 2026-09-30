@@ -9,6 +9,7 @@ import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
 import { createOptiFrameCanvasCache, createOptiLaneSurface, cropOptiLaneGrid, getOptiLaneLayout, type OptiLaneCount } from '../../lib/optiframeLanes';
 import { decodeOptiCodeFileTransfer, type OptiCodeFileTransfer } from '../../lib/opticodeTransfer';
 import { createOpticalFountainTransfer, OpticalFountainDecoder, parseOpticalFountainFrame, type OpticalFountainPlan } from '../../lib/opticalFountain';
+import { estimateOpticalThroughput, formatRate, formatTransferTime, measureDisplayRefreshRate, recommendOptiLaneCount } from '../../lib/opticalThroughput';
 
 type CameraStats = {
   attempts: number;
@@ -105,6 +106,7 @@ export function OptiFrameLab() {
   const [streamIndex, setStreamIndex] = useState(0);
   const [laneCount, setLaneCount] = useState<OptiLaneCount>(1);
   const [streamIntervalMs, setStreamIntervalMs] = useState(8);
+  const [displayRefreshHz, setDisplayRefreshHz] = useState(60);
   const [transferFile, setTransferFile] = useState<File | null>(null);
   const [transferData, setTransferData] = useState<Uint8Array | null>(null);
   const [opticalFountainPlan, setOpticalFountainPlan] = useState<OpticalFountainPlan | null>(null);
@@ -168,6 +170,23 @@ export function OptiFrameLab() {
     () => Math.max(1, streamGroupCount * laneCount),
     [streamGroupCount, laneCount],
   );
+
+  const laneLayout = useMemo(() => getOptiLaneLayout(laneCount), [laneCount]);
+  const effectiveRefreshHz = Math.min(displayRefreshHz, 1000 / Math.max(1, streamIntervalMs));
+  const throughput = useMemo(
+    () => estimateOpticalThroughput(laneCount, effectiveRefreshHz),
+    [laneCount, effectiveRefreshHz],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void measureDisplayRefreshRate(24).then(hz => {
+      if (!cancelled && Number.isFinite(hz) && hz > 0) setDisplayRefreshHz(Math.round(hz * 10) / 10);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1135,7 +1154,7 @@ export function OptiFrameLab() {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
           aspectRatio: { ideal: 16 / 9 },
-          frameRate: { ideal: 60, max: 60 },
+          frameRate: { ideal: 120, max: 120 },
         },
         audio: false,
       });
@@ -1152,7 +1171,7 @@ export function OptiFrameLab() {
           const cameraConstraints: OptiVideoTrackConstraints = {
             width: { ideal: Math.min(1920, capabilities.width?.max ?? 1920) },
             height: { ideal: Math.min(1080, capabilities.height?.max ?? 1080) },
-            frameRate: { ideal: Math.min(60, capabilities.frameRate?.max ?? 60), max: Math.min(60, capabilities.frameRate?.max ?? 60) },
+            frameRate: { ideal: Math.min(120, capabilities.frameRate?.max ?? 120), max: Math.min(120, capabilities.frameRate?.max ?? 120) },
           };
           if (Array.isArray(resizeModes) && resizeModes.includes('none')) {
             cameraConstraints.resizeMode = 'none';
