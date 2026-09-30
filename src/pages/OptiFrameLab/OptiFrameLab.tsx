@@ -7,6 +7,7 @@ import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from '../../lib
 import { OptiFrameDecodePool } from '../../lib/optiframeDecodePool';
 import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
 import { createOptiFrameCanvasCache, createOptiLaneSurface, cropOptiLaneGrid, getOptiLaneLayout, type OptiLaneCount } from '../../lib/optiframeLanes';
+import { OptiFrameSurfacePool } from '../../lib/optiframeSurfacePool';
 import { decodeOptiCodeFileTransfer, type OptiCodeFileTransfer } from '../../lib/opticodeTransfer';
 import { createOpticalFountainTransfer, OpticalFountainDecoder, parseOpticalFountainFrame, type OpticalFountainPlan } from '../../lib/opticalFountain';
 import { estimateOpticalThroughput, formatRate, formatTransferTime, measureDisplayRefreshRate, recommendOptiLaneCount } from '../../lib/opticalThroughput';
@@ -127,6 +128,7 @@ export function OptiFrameLab() {
   const assemblerRef = useRef(new OptiFrameAssembler());
   const opticalFountainDecoderRef = useRef(new OpticalFountainDecoder());
   const decodePoolRef = useRef(new OptiFrameDecodePool());
+  const surfacePoolRef = useRef(new OptiFrameSurfacePool());
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const presentationCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -192,6 +194,7 @@ export function OptiFrameLab() {
     return () => {
       stopCamera();
       decodePoolRef.current.terminate();
+      surfacePoolRef.current.terminate();
       if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
     };
   }, []);
@@ -225,6 +228,33 @@ export function OptiFrameLab() {
     senderGroupRef.current = Math.floor(streamIndexValueRef.current / laneCount);
     senderLastPaintAtRef.current = 0;
     senderSurfaceCacheRef.current.clear();
+    surfacePoolRef.current.clear();
+
+    const getPayloads = (group: number) => opticalFountainPlan
+      ? Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount))
+      : Array.from({ length: laneCount }, (_, lane) =>
+          streamPayload[(group * laneCount + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
+        );
+
+    const queueWorkerPrefetch = (group: number) => {
+      const window = Math.min(4, Math.max(1, streamGroupCount));
+      for (let offset = 1; offset <= window; offset += 1) {
+        const nextGroup = group + offset;
+        const key = [
+          opticalFountainPlan?.session ?? 'chunk',
+          laneCount,
+          opticalFountainPlan ? 'fountain' : 'frames',
+          nextGroup,
+        ].join(':');
+        surfacePoolRef.current.request(
+          key,
+          nextGroup * laneCount,
+          streamGroupCount,
+          laneCount,
+          getPayloads(nextGroup),
+        );
+      }
+    };
 
     const drawDirect = (group: number) => {
       const key = [
@@ -235,12 +265,9 @@ export function OptiFrameLab() {
       ].join(':');
 
       let surface = senderSurfaceCacheRef.current.get(key);
-      if (!surface) {
-        const payloads = opticalFountainPlan
-          ? Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount))
-          : Array.from({ length: laneCount }, (_, lane) =>
-              streamPayload[(group * laneCount + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
-            );
+      let workerBitmap = surfacePoolRef.current.take(key);
+      if (!surface && !workerBitmap) {
+        const payloads = getPayloads(group);
 
         try {
           // The direct sender already maintains a rolling group cache.
@@ -265,17 +292,20 @@ export function OptiFrameLab() {
       }
 
       const paint = (target: HTMLCanvasElement | null) => {
-        if (!target || !surface) return;
+        const source = surface ?? workerBitmap;
+        if (!target || !source) return;
         const ctx = target.getContext('2d', { alpha: false, desynchronized: true });
         if (!ctx) return;
         if (target.width !== surface.width) target.width = surface.width;
-        if (target.height !== surface.height) target.height = surface.height;
+        if (target.height !== source.height) target.height = source.height;
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(surface, 0, 0);
+        ctx.drawImage(source, 0, 0);
       };
 
       paint(streamCanvasRef.current);
       paint(presentationCanvasRef.current);
+      workerBitmap?.close();
+      queueWorkerPrefetch(group);
 
       // Keep the control UI current at a human-readable cadence rather than
       // re-rendering React at optical-frame frequency.
@@ -296,7 +326,7 @@ export function OptiFrameLab() {
         now - senderCadenceAtRef.current >= streamIntervalMs
       ) {
         drawDirect(senderGroupRef.current);
-        senderGroupRef.current = (senderGroupRef.current + 1) % streamGroupCount;
+        senderGroupRef.current += 1;
         senderCadenceAtRef.current = now;
       }
       senderRafRef.current = window.requestAnimationFrame(tick);
@@ -307,7 +337,7 @@ export function OptiFrameLab() {
     senderRafRef.current = window.requestAnimationFrame((now) => {
       if (senderCadenceAtRef.current === 0 || now - senderCadenceAtRef.current >= streamIntervalMs) {
         drawDirect(senderGroupRef.current);
-        senderGroupRef.current = (senderGroupRef.current + 1) % streamGroupCount;
+        senderGroupRef.current += 1;
         senderCadenceAtRef.current = now;
       }
       senderRafRef.current = window.requestAnimationFrame(tick);
