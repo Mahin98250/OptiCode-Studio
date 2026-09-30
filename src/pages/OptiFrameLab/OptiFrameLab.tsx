@@ -248,7 +248,7 @@ export function OptiFrameLab() {
         ].join(':');
         surfacePoolRef.current.request(
           key,
-          nextGroup * laneCount,
+          nextGroup,
           streamGroupCount,
           laneCount,
           getPayloads(nextGroup),
@@ -296,7 +296,7 @@ export function OptiFrameLab() {
         if (!target || !source) return;
         const ctx = target.getContext('2d', { alpha: false, desynchronized: true });
         if (!ctx) return;
-        if (target.width !== surface.width) target.width = surface.width;
+        if (target.width !== source.width) target.width = source.width;
         if (target.height !== source.height) target.height = source.height;
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(source, 0, 0);
