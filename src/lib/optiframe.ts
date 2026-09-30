@@ -77,17 +77,30 @@ function zones() {
   ] as const;
 }
 
+function zoneOrigin(r: number, c: number): [number, number] | null {
+  const high = OPTIFRAME_SIZE - FINDER_OFFSET - FINDER_SIZE;
+  if (r >= FINDER_OFFSET && r < FINDER_OFFSET + FINDER_SIZE && c >= FINDER_OFFSET && c < FINDER_OFFSET + FINDER_SIZE) {
+    return [FINDER_OFFSET, FINDER_OFFSET];
+  }
+  if (r >= FINDER_OFFSET && r < FINDER_OFFSET + FINDER_SIZE && c >= high && c < high + FINDER_SIZE) {
+    return [FINDER_OFFSET, high];
+  }
+  if (r >= high && r < high + FINDER_SIZE && c >= FINDER_OFFSET && c < FINDER_OFFSET + FINDER_SIZE) {
+    return [high, FINDER_OFFSET];
+  }
+  if (r >= high && r < high + FINDER_SIZE && c >= high && c < high + FINDER_SIZE) {
+    return [high, high];
+  }
+  return null;
+}
+
 function isFinderCell(r: number, c: number) {
-  return zones().some(([y, x]) => r >= y && r < y + FINDER_SIZE && c >= x && c < x + FINDER_SIZE);
+  return zoneOrigin(r, c) !== null;
 }
 
 function finderValue(r: number, c: number) {
-  for (const [y, x] of zones()) {
-    if (r >= y && r < y + FINDER_SIZE && c >= x && c < x + FINDER_SIZE) {
-      return finderBit(r - y, c - x) ? 3 : 0;
-    }
-  }
-  return -1;
+  const origin = zoneOrigin(r, c);
+  return origin ? (finderBit(r - origin[0], c - origin[1]) ? 3 : 0) : -1;
 }
 
 function capacityBits() {
@@ -111,12 +124,19 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
     throw new Error('OptiFrame metadata is out of range.');
   }
 
-  const header: number[] = [];
-  writeBits(header, MAGIC, 16);
-  writeBits(header, HEADER_VERSION, 4);
-  writeBits(header, sequence, 16);
-  writeBits(header, total, 16);
-  writeBits(header, payload.length, 12);
+  // The protocol layout is exactly 64 header bits followed by payload+CRC
+  // bytes. Build those 8 header bytes directly, then read every two payload bits
+  // in-place while rasterizing. This removes the old ~32k-element bit-array
+  // allocation on every optical frame.
+  const header = new Uint8Array(8);
+  header[0] = MAGIC >>> 8;
+  header[1] = MAGIC & 255;
+  header[2] = (HEADER_VERSION << 4) | ((sequence >>> 12) & 0x0f);
+  header[3] = (sequence >>> 4) & 255;
+  header[4] = ((sequence & 0x0f) << 4) | ((total >>> 12) & 0x0f);
+  header[5] = (total >>> 4) & 255;
+  header[6] = ((total & 0x0f) << 4) | ((payload.length >>> 8) & 0x0f);
+  header[7] = payload.length & 255;
 
   const body = new Uint8Array(payload.length + 4);
   body.set(payload);
@@ -126,7 +146,6 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   body[payload.length + 2] = crc >>> 8;
   body[payload.length + 3] = crc;
 
-  const bits = [...header, ...bytesToBits(body)];
   const canvas = document.createElement('canvas');
   canvas.width = OPTIFRAME_SIZE;
   canvas.height = OPTIFRAME_SIZE;
@@ -134,14 +153,23 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   if (!ctx) throw new Error('Canvas unavailable.');
 
   const image = ctx.createImageData(OPTIFRAME_SIZE, OPTIFRAME_SIZE);
-  let cursor = 0;
+  let cursorBits = 0;
   for (let r = 0; r < OPTIFRAME_SIZE; r++) {
     for (let col = 0; col < OPTIFRAME_SIZE; col++) {
       const i = (r * OPTIFRAME_SIZE + col) * 4;
       let level = finderValue(r, col);
       if (level < 0) {
-        level = ((bits[cursor] ?? 0) << 1) | (bits[cursor + 1] ?? 0);
-        cursor += 2;
+        if (cursorBits < HEADER_BITS) {
+          const headerByte = header[cursorBits >>> 3];
+          const shift = 6 - (cursorBits & 7);
+          level = (headerByte >>> shift) & 3;
+        } else {
+          const bodyBit = cursorBits - HEADER_BITS;
+          const bodyByte = body[bodyBit >>> 3];
+          const shift = 6 - (bodyBit & 7);
+          level = (bodyByte >>> shift) & 3;
+        }
+        cursorBits += 2;
       }
       const lum = LUMINANCE_LEVELS[level as 0 | 1 | 2 | 3];
       image.data[i] = lum;
