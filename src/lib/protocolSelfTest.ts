@@ -1,3 +1,4 @@
+import { OPTIFRAME_MAX_PAYLOAD } from './optiframe';
 import { analyzeScan } from './scan';
 import { QrEncodePool } from './qrEncodePool';
 import { QrDecodePool } from './qrDecodePool';
@@ -18,7 +19,7 @@ import {
   reconstructMultiImage,
 } from './imageQr';
 import { estimateOpticalSpeed, frameGenerationCeiling } from './opticalSpeedLab';
-import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_BLOCK_BYTES, OPTICAL_FOUNTAIN_OVERHEAD, parseOpticalFountainFrame } from './opticalFountain';
+import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_BLOCK_BYTES, parseOpticalFountainFrame } from './opticalFountain';
 import {
   OR_TRANSFER_CHUNK_CHARS,
   addTransferFrame,
@@ -713,17 +714,17 @@ async function opticalFountainRoundTripDiagnostic() {
   assert(plan.blockBytes === OPTICAL_FOUNTAIN_BLOCK_BYTES, 'Optical fountain did not fill its current OptiFrame payload budget.');
   assert(plan.totalBlocks === Math.ceil(file.size / plan.blockBytes), 'Optical fountain block count mismatch.');
 
-  const groups = Math.max(
-    1,
-    Math.ceil((plan.totalBlocks + Math.ceil(plan.totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD)) / 4),
-  );
+  const groups = plan.getCycleGroups(4);
+  const groups6 = plan.getCycleGroups(6);
+  assert(groups >= groups6, 'Six-lane fountain planner should not require more screen groups than four-lane mode.');
+  assert(groups * 4 >= groups6 * 6 - 6, 'Lane-aware group planner produced an inconsistent packet budget.');
   const decoder = new OpticalFountainDecoder();
   let observed = 0;
 
   for (let group = 0; group < groups; group += 1) {
     for (let lane = 0; lane < 4; lane += 1) {
       const packet = plan.getFrame(lane, group, 4);
-      assert(packet.byteLength <= 3_900, 'Optical fountain packet exceeded OptiFrame payload capacity.');
+      assert(packet.byteLength <= OPTIFRAME_MAX_PAYLOAD, 'Optical fountain packet exceeded the current OptiFrame payload capacity.');
       const parsed = parseOpticalFountainFrame(packet);
       assert(parsed, 'Optical fountain packet failed to parse at group ' + group + ', lane ' + lane + '.');
       const result = decoder.add(parsed);
@@ -744,10 +745,7 @@ async function opticalFountainLossRecoveryDiagnostic() {
   const original = makeBytes(180_000, 73);
   const file = new File([original], 'diagnostic-optical-fountain-loss.bin', { type: 'application/octet-stream' });
   const plan = await createOpticalFountainTransfer(file);
-  const groupsPerPass = Math.max(
-    1,
-    Math.ceil((plan.totalBlocks + Math.ceil(plan.totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD)) / 4),
-  );
+  const groupsPerPass = plan.getCycleGroups(4);
 
   const packets: Array<NonNullable<ReturnType<typeof parseOpticalFountainFrame>>> = [];
   const passes = 2;
@@ -782,7 +780,7 @@ async function opticalFountainLossRecoveryDiagnostic() {
   assert(rebuilt, 'Optical fountain failed deterministic lossy recovery.');
   expectEqualBytes(rebuilt.bytes, original, 'Optical fountain lossy recovery');
   assert(rebuilt.hash === plan.hash, 'Optical fountain lossy SHA-256 mismatch.');
-  return delivery.length + ' delivered packets · ~18% deterministic packet loss · out-of-order delivery · ' + duplicates + ' duplicate(s) · recovered exactly';
+  return delivery.length + ' delivered packets · ~18% deterministic packet loss · out-of-order delivery · ' + duplicates + ' duplicate(s) · lane-aware groups verified · recovered exactly';
 }
 
 async function adaptiveTransmissionDiagnostic() {
