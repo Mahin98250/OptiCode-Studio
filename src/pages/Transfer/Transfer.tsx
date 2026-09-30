@@ -199,12 +199,66 @@ export function Transfer() {
   const [opticalGuideRect,setOpticalGuideRect]=useState<OpticalGuideRect|null>(null);
   const [opticalGuideDiagnostics,setOpticalGuideDiagnostics]=useState<OpticalGuideDiagnostics>({framing:'searching',distance:'unknown',lighting:'unknown',stability:'moving',geometry:'searching',focus:'unknown'});
   const [opticalTrack,setOpticalTrack]=useState({confidence:0,predicted:false,ageMs:0});
+
+  // Render the lock independently from decoder cadence. Decoders may deliver
+  // geometry at 10–30 Hz, while the camera preview can be 30–60+ Hz. A
+  // critically-damped spring makes the visual lock follow the latest target
+  // continuously without the 100 ms CSS-transition "rubber band" lag.
+  useEffect(()=>{
+    if(!receiving){
+      if(opticalVisualRafRef.current!==null){
+        cancelAnimationFrame(opticalVisualRafRef.current);
+        opticalVisualRafRef.current=null;
+      }
+      opticalVisualTargetRef.current=null;
+      opticalVisualCurrentRef.current=null;
+      opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
+      return;
+    }
+
+    let last=performance.now();
+    const tick=(time:number)=>{
+      const target=opticalVisualTargetRef.current;
+      const current=opticalVisualCurrentRef.current;
+      if(target){
+        const base=current ?? target;
+        const next={...base};
+        const velocity=opticalVisualVelocityRef.current;
+        const dt=Math.min(.034,Math.max(.008,(time-last)/1000));
+        last=time;
+        // Critically damped-ish spring. Position follows quickly, while
+        // velocity damping prevents jitter/overshoot when decoder boxes move.
+        const stiffness=190;
+        const damping=25;
+        (['left','top','width','height'] as const).forEach(key=>{
+          const displacement=target[key]-base[key];
+          velocity[key]+=displacement*stiffness*dt;
+          velocity[key]*=Math.exp(-damping*dt);
+          next[key]=base[key]+velocity[key]*dt;
+        });
+        opticalVisualCurrentRef.current=next;
+        setOpticalGuideRect(next);
+      }
+      opticalVisualRafRef.current=requestAnimationFrame(tick);
+    };
+    opticalVisualRafRef.current=requestAnimationFrame(tick);
+    return()=>{
+      if(opticalVisualRafRef.current!==null){
+        cancelAnimationFrame(opticalVisualRafRef.current);
+        opticalVisualRafRef.current=null;
+      }
+    };
+  },[receiving]);
   const opticalTrackRef=useRef<OpticalTrack|null>(null);
   const lastGuideBoxRef=useRef<{x:number;y:number;width:number;height:number}|null>(null);
   const guideStableCountRef=useRef(0);
   const guideDetectionStreakRef=useRef(0);
   const guideDistanceRef=useRef<OpticalGuideDiagnostics['distance']>('unknown');
   const guideMissStreakRef=useRef(0);
+  const opticalVisualTargetRef=useRef<OpticalGuideRect|null>(null);
+  const opticalVisualCurrentRef=useRef<OpticalGuideRect|null>(null);
+  const opticalVisualVelocityRef=useRef({left:0,top:0,width:0,height:0});
+  const opticalVisualRafRef=useRef<number|null>(null);
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
   const feedbackVideoRef=useRef<HTMLVideoElement>(null);
@@ -1146,12 +1200,17 @@ export function Transfer() {
       const contentHeight=frameRatio>elementRatio ? elementWidth/frameRatio : elementHeight;
       const offsetX=(elementWidth-contentWidth)/2;
       const offsetY=(elementHeight-contentHeight)/2;
-      setOpticalGuideRect({
+      const targetRect={
         left:Math.max(0,Math.min(100,(offsetX+(square.x/frameWidth)*contentWidth)/elementWidth*100)),
         top:Math.max(0,Math.min(100,(offsetY+(square.y/frameHeight)*contentHeight)/elementHeight*100)),
         width:Math.max(1,Math.min(100,(square.width/frameWidth)*contentWidth/elementWidth*100)),
         height:Math.max(1,Math.min(100,(square.height/frameHeight)*contentHeight/elementHeight*100)),
-      });
+      };
+      opticalVisualTargetRef.current=targetRect;
+      if(!opticalVisualCurrentRef.current){
+        opticalVisualCurrentRef.current=targetRect;
+        setOpticalGuideRect(targetRect);
+      }
     };
 
     const applyMessage=(title:string,detail:string,tone:OpticalGuideState['tone'],quality:number)=>{
@@ -1172,7 +1231,10 @@ export function Transfer() {
         width:previous.box.width+previous.vw*dt,
         height:previous.box.height+previous.vh*dt,
       } : primary;
-      const alpha=previous ? .52 : 1;
+      // High-gain measurement update: the visual spring handles the final
+      // interpolation, so the logical tracker should not introduce another
+      // large lag layer.
+      const alpha=previous ? .82 : 1;
       const smoothed={
         x:predicted.x+(primary.x-predicted.x)*alpha,
         y:predicted.y+(primary.y-predicted.y)*alpha,
@@ -1382,7 +1444,7 @@ export function Transfer() {
           height:Math.min(frameHeight,predicted.height),
         };
         const decayed=Math.max(0,current.confidence-Math.min(.30,age/900));
-        opticalTrackRef.current={...current,box:clamped,vx:current.vx*.70,vy:current.vy*.70,vw:current.vw*.70,vh:current.vh*.70,confidence:decayed,misses:current.misses+1};
+        opticalTrackRef.current={...current,box:clamped,vx:current.vx*.84,vy:current.vy*.84,vw:current.vw*.84,vh:current.vh*.84,confidence:decayed,misses:current.misses+1};
         setOpticalTrack({confidence:decayed,predicted:true,ageMs:Math.round(age)});
         setRectFromBox(clamped);
 
@@ -1804,6 +1866,9 @@ export function Transfer() {
     compatAckSequenceRef.current=0;
     lastGuideBoxRef.current=null;
     guideStableCountRef.current=0;
+    opticalVisualTargetRef.current=null;
+    opticalVisualCurrentRef.current=null;
+    opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
     setOpticalGuideRect(null);
     opticalTrackRef.current=null;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
@@ -1993,7 +2058,7 @@ export function Transfer() {
 
               {opticalGuideRect&&(
                 <div
-                  className="absolute transition-all duration-100 ease-out"
+                  className="absolute will-change-[left,top,width,height]"
                   style={{
                     left:opticalGuideRect.left+'%',
                     top:opticalGuideRect.top+'%',
