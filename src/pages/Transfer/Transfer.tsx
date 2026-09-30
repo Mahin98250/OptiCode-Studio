@@ -1491,6 +1491,23 @@ export function Transfer() {
       if(!videoTrack){
         throw new Error('Camera permission succeeded, but no video track was returned.');
       }
+
+      // Prefer a real 60 FPS / 1280-wide camera mode when the device exposes it.
+      // This keeps enough pixels for dense QR grids while cutting the CPU/GPU
+      // cost of pushing 1080p/4K camera frames through the decoder pool.
+      try{
+        const caps=videoTrack.getCapabilities?.() as MediaTrackCapabilities & {frameRate?:{max?:number};width?:{max?:number}};
+        if((caps.frameRate?.max ?? 0)>=60){
+          await videoTrack.applyConstraints({
+            frameRate:{exact:60},
+            width:{ideal:1280,max:1280},
+            height:{ideal:720,max:720},
+          });
+        }
+      }catch{
+        // Keep the successfully opened stream when the browser refuses a live
+        // reconfiguration (common on mobile Safari).
+      }
       videoTrack.addEventListener('ended',()=>{
         if(!receivingRef.current)return;
         stopReceive();
