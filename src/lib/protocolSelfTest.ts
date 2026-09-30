@@ -2,7 +2,7 @@ import { analyzeScan } from './scan';
 import { QrEncodePool } from './qrEncodePool';
 import { QrDecodePool } from './qrDecodePool';
 import { createQrMatrices, drawQrMatricesToCanvas } from './qrCanvas';
-import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, optiFrameSelfTest } from './optiframe';
+import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, getOptiFrameCapacity, OPTIFRAME_SIZE, optiFrameSelfTest } from './optiframe';
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from './optiframeStream';
 import { cropOptiLaneGrid, createOptiFrameCanvasCache, createOptiLaneSurface, getOptiLaneLayout, type OptiLaneCount } from './optiframeLanes';
 import { OptiFrameDecodePool } from './optiframeDecodePool';
@@ -651,7 +651,7 @@ async function optiFrameMultiLaneRoundTrip() {
     assert(ctx, 'Multi-lane fixture canvas context unavailable.');
     const image = ctx.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
     const lanes = cropOptiLaneGrid(image, laneCount);
-    const expectedLaneSize = laneCount === 1 ? 768 : 384;
+    const expectedLaneSize = laneCount === 1 ? OPTIFRAME_SIZE * 4 : OPTIFRAME_SIZE * 3;
     assert(lanes.length === laneCount, 'Expected ' + laneCount + ' cropped lanes, got ' + lanes.length + '.');
     assert(lanes.every(lane => lane.image.width === expectedLaneSize && lane.image.height === expectedLaneSize), 'Multi-lane crop did not preserve the physical lane raster.');
 
@@ -687,7 +687,7 @@ async function optiFrameMultiLaneRoundTrip() {
 }
 
 async function optiFrameEncodeThroughputDiagnostic() {
-  const payload = makeBytes(3_900, 217);
+  const payload = makeBytes(getOptiFrameCapacity(), 217);
   const samples = 24;
   const started = performance.now();
   let pixels = 0;
@@ -696,7 +696,7 @@ async function optiFrameEncodeThroughputDiagnostic() {
     pixels += encoded.canvas.width * encoded.canvas.height;
   }
   const elapsed = performance.now() - started;
-  assert(pixels === samples * 128 * 128, 'OptiFrame encode benchmark raster size changed unexpectedly.');
+  assert(pixels === samples * OPTIFRAME_SIZE * OPTIFRAME_SIZE, 'OptiFrame encode benchmark raster size changed unexpectedly.');
   assert(Number.isFinite(elapsed), 'OptiFrame encode benchmark returned an invalid duration.');
   return samples + ' max-payload frames · ' +
     Math.round(pixels / Math.max(0.001, elapsed / 1000) / 1000) +
@@ -710,7 +710,7 @@ async function opticalFountainRoundTripDiagnostic() {
   const plan = await createOpticalFountainTransfer(file);
 
   assert(plan.blockBytes === OPTICAL_FOUNTAIN_BLOCK_BYTES, 'Optical fountain block-size contract mismatch.');
-  assert(plan.blockBytes === 3_872, 'Optical fountain did not fill the 3,900-byte OptiFrame payload budget after its binary header.');
+  assert(plan.blockBytes === OPTICAL_FOUNTAIN_BLOCK_BYTES, 'Optical fountain did not fill its current OptiFrame payload budget.');
   assert(plan.totalBlocks === Math.ceil(file.size / plan.blockBytes), 'Optical fountain block count mismatch.');
 
   const groups = Math.max(
@@ -737,7 +737,7 @@ async function opticalFountainRoundTripDiagnostic() {
   assert(rebuilt, 'Optical fountain did not reconstruct after complete systematic/coded transmission.');
   expectEqualBytes(rebuilt.bytes, original, 'Optical fountain round trip');
   assert(rebuilt.hash === plan.hash, 'Optical fountain SHA-256 mismatch.');
-  return observed + ' binary packets · ' + plan.totalBlocks + ' source blocks · 3,872-byte blocks · complete SHA-256 verified';
+  return observed + ' binary packets · ' + plan.totalBlocks + ' source blocks · ' + plan.blockBytes + '-byte blocks · complete SHA-256 verified';
 }
 
 async function opticalFountainLossRecoveryDiagnostic() {
