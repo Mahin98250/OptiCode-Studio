@@ -156,13 +156,10 @@ export function OptiFrameLab() {
 
   const streamGroupCount = useMemo(() => {
     if (opticalFountainPlan) {
-      return Math.max(
-        1,
-        Math.ceil(
-          (opticalFountainPlan.totalBlocks + Math.ceil(opticalFountainPlan.totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD))
-          / laneCount,
-        ),
-      );
+      // The fountain planner owns the packet budget, so the number of screen
+      // groups is derived from the active lane count instead of an implicit
+      // four-lane assumption.
+      return opticalFountainPlan.getCycleGroups(laneCount);
     }
     return Math.max(1, Math.ceil(streamPayload.length / laneCount));
   }, [opticalFountainPlan, streamPayload.length, laneCount]);
