@@ -319,6 +319,18 @@ async function fountainRoundTrip() {
   }
 
   assert(duplicateObserved, 'Fountain duplicate tolerance was not exercised.');
+  // Verify that later fountain cycles keep the systematic source sweep but
+  // generate fresh repair seeds, so repeated cycles add new redundancy.
+  const repairStart = Math.ceil(plan.totalBlocks / 4);
+  const firstCycleRepair = parseOpticalFountainFrame(
+    plan.getFrame(0, repairStart + 1, 4),
+  );
+  const secondCycleRepair = parseOpticalFountainFrame(
+    plan.getFrame(0, groups + repairStart + 1, 4),
+  );
+  if (firstCycleRepair?.kind === 'data' && secondCycleRepair?.kind === 'data') {
+    assert(firstCycleRepair.seed !== secondCycleRepair.seed, 'Optical fountain repair cycle reused the same seed.');
+  }
   const rebuilt = await decoder.reconstruct();
   assert(rebuilt, 'Fountain decoder could not reconstruct under simulated loss/out-of-order delivery.');
   expectEqualBytes(rebuilt.bytes, original, 'Fountain lossy round-trip');
