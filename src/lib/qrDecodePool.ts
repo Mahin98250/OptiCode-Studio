@@ -50,7 +50,7 @@ export class QrDecodePool{
     return this.workers.reduce((count,_,index)=>count+(this.failed.has(index)?0:1),0);
   }
 
-  decode(buffer:ArrayBuffer,width:number,height:number,maxDepth=2):Promise<DecodeResult>|null{
+  decode(buffer:ArrayBuffer,width:number,height:number,maxDepth=2,maxNumberOfSymbols=4):Promise<DecodeResult>|null{
     const workerIndex=this.available;
     if(workerIndex<0)return null;
     const id=this.nextId++;
@@ -60,7 +60,7 @@ export class QrDecodePool{
     return new Promise((resolve,reject)=>{
       this.pending.set(id,{workerIndex,resolve,reject});
       try{
-        worker.postMessage({id,width,height,buffer,maxDepth},[buffer]);
+        worker.postMessage({id,width,height,buffer,maxDepth,maxNumberOfSymbols},[buffer]);
       }catch(error){
         this.pending.delete(id);
         this.busy.delete(workerIndex);
