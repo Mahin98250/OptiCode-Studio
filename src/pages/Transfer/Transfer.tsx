@@ -336,6 +336,7 @@ export function Transfer() {
   const feedbackActiveRef=useRef(false);
   const feedbackLastAckSeqRef=useRef(-1);
   const feedbackConnectedRef=useRef(false);
+  const fountainFeedbackRateRef=useRef({at:0,received:0});
   const feedbackLastAtRef=useRef<number|null>(null);
   const feedbackMissingSetRef=useRef(new Set<number>());
   const feedbackRetryIndexRef=useRef<number|null>(null);
@@ -633,7 +634,7 @@ export function Transfer() {
                 }else if(ackAge<900 && avgRender<22 && fps>18 && intervalMs>16){
                   setIntervalMs(v=>Math.max(16,v-10));
                 }
-              }else if(fountainMode){
+              }else if(fountainMode && !(feedbackEnabled && feedbackConnectedRef.current)){
                 if(avgRender<14 && fps>18 && intervalMs>16)setIntervalMs(v=>Math.max(16,v-5));
                 else if(avgRender>55 && intervalMs<500)setIntervalMs(v=>Math.min(500,v+20));
               }
@@ -705,6 +706,7 @@ export function Transfer() {
   function resetFeedbackState(){
     feedbackLastAckSeqRef.current=-1;
     feedbackConnectedRef.current=false;
+    fountainFeedbackRateRef.current={at:0,received:0};
     feedbackLastAtRef.current=null;
     feedbackMissingSetRef.current.clear();
     feedbackRetryIndexRef.current=null;
@@ -752,6 +754,29 @@ export function Transfer() {
     }else if(ack.mode==='fountain' && fountain){
       setFeedbackMissing([]);
       setFeedbackState(ack.state==='complete' ? 'complete' : 'connected');
+
+      // Receiver-driven fountain governor. Render FPS alone cannot tell us if
+      // the phone camera is actually keeping up. The receiver reports solved
+      // source blocks, so estimate physical optical goodput from ACK deltas and
+      // push the sender toward the highest rate the current device pair can
+      // sustain. This is the control loop that turns a fixed QR slideshow into
+      // an adaptive optical transport.
+      if(autoTune && feedbackEnabled && feedbackConnectedRef.current){
+        const now=Date.now();
+        const rateState=fountainFeedbackRateRef.current;
+        if(rateState.at>0){
+          const deltaSolved=Math.max(0,ack.received-rateState.received);
+          const deltaMs=Math.max(1,now-rateState.at);
+          const solvedPerSecond=deltaSolved/(deltaMs/1000);
+          if(solvedPerSecond>=8 && deltaMs>=180){
+            setIntervalMs(value=>Math.max(16,value-4));
+          }else if(solvedPerSecond<2 && deltaMs>=500){
+            setIntervalMs(value=>Math.min(1000,value+18));
+          }
+        }
+        fountainFeedbackRateRef.current={at:now,received:ack.received};
+      }
+
       if(ack.state==='complete'){
         setPlaying(false);
         stopFeedbackCamera();
