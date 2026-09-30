@@ -223,12 +223,14 @@ export function OptiFrameLab() {
             );
 
         try {
+          // The direct sender already maintains a rolling group cache.
+          // Skip the payload→Base64 LRU here to reduce allocations in the
+          // highest-rate transmission path.
           surface = createOptiLaneSurface(
             payloads,
             group,
             streamGroupCount,
             laneCount,
-            streamFrameCacheRef.current,
           ).canvas;
         } catch {
           return;
