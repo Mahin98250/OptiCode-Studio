@@ -82,7 +82,7 @@ export function Transfer() {
   const [playing,setPlaying]=useState(false);
   // Reliability-first physical MVP: each compatibility QR is displayed long
   // enough for a slow camera to acquire it, and compatibility playback repeats it.
-  const [intervalMs,setIntervalMs]=useState(60);
+  const [intervalMs,setIntervalMs]=useState(35);
   // Protect the final compatibility frame with an explicit acquisition tail.
   const FINAL_FRAME_EXTRA_DWELLS=3;
   const [error,setError]=useState('');
@@ -187,8 +187,17 @@ export function Transfer() {
   const ackPublishTimerRef=useRef<number|null>(null);
   const ackPendingPayloadRef=useRef<string|null>(null);
   const ackLastPublishedAtRef=useRef(0);
+  const progressUiTickRef=useRef(0);
   const opticalCanvasSizeRef=useRef(900);
   const resultUrlRef=useRef<string|null>(null);
+
+  function publishProgress(next:Progress){
+    const now=performance.now();
+    if(now-progressUiTickRef.current>=100 || next.received===next.total){
+      progressUiTickRef.current=now;
+      setProgress(next);
+    }
+  }
 
   function measureOpticalCanvasSize(canvas:HTMLCanvasElement){
     const cssWidth=Math.max(280,Math.floor(canvas.getBoundingClientRect().width || canvas.clientWidth || window.innerWidth));
@@ -918,7 +927,7 @@ export function Transfer() {
       }
 
       if(receivingRef.current && nativeActiveRef.current){
-        nativeLoopRef.current=window.setTimeout(()=>void loop(),45);
+        nativeLoopRef.current=window.setTimeout(()=>void loop(),20);
       }
     };
 
@@ -1171,7 +1180,7 @@ export function Transfer() {
       const added=await addMultiImageChunk(value);
       if(!added)return;
       if(added.duplicate)duplicateCountRef.current+=1;
-      setProgress({mode:'multi-image',session:added.id,name:added.name,received:added.received,total:added.total,duplicates:duplicateCountRef.current});
+      publishProgress({mode:'multi-image',session:added.id,name:added.name,received:added.received,total:added.total,duplicates:duplicateCountRef.current});
       if(added.complete){
         const rebuilt=await reconstructMultiImage(added.id);
         if(rebuilt){
@@ -1203,7 +1212,7 @@ export function Transfer() {
       if(d.duplicate)duplicateCountRef.current+=1;
       solvedRef.current=d.solved;
       decodedBytesRef.current=Math.min(frame.size,d.solved*frame.blockBytes);
-      setProgress({mode:'fountain',session:frame.session,name:frame.name,received:d.solved,total:frame.blocks,duplicates:duplicateCountRef.current});
+      publishProgress({mode:'fountain',session:frame.session,name:frame.name,received:d.solved,total:frame.blocks,duplicates:duplicateCountRef.current});
       publishFountainAck(frame,d.solved,d.complete);
       if(d.complete){
         const rebuilt=await fountainReadingRef.current.reconstruct();
@@ -1231,7 +1240,7 @@ export function Transfer() {
       if(compatibilitySessionRef.current!==sessionAtStart)return;
       if(added.duplicate)duplicateCountRef.current+=1;
       decodedBytesRef.current=Math.min(frame.size,Math.round((added.received/added.total)*frame.size));
-      setProgress(prev=>({mode:'compatibility',session:frame.session,name:frame.name,received:added.received,total:added.total,duplicates:duplicateCountRef.current}));
+      publishProgress({mode:'compatibility',session:frame.session,name:frame.name,received:added.received,total:added.total,duplicates:duplicateCountRef.current});
       publishCompatibilityAck(frame,added.received,added.complete);
       if(added.complete){
         const rebuilt=await reconstructTransfer(frame.session);
@@ -1260,7 +1269,7 @@ export function Transfer() {
     if(!ctx || !recoveryCtx){ setError('Camera fallback decoder could not create an image surface.'); stopReceive(); return; }
     let pool:QrDecodePool;
     try{
-      pool=qrPoolRef.current ?? new QrDecodePool(1);
+      pool=qrPoolRef.current ?? new QrDecodePool();
       qrPoolRef.current=pool;
     }catch(error){
       fallbackActiveRef.current=false;
@@ -1455,7 +1464,7 @@ export function Transfer() {
           facingMode:{ideal:'environment'},
           width:{ideal:1920,max:2560},
           height:{ideal:1080,max:1440},
-          frameRate:{ideal:30,max:30},
+          frameRate:{ideal:60,max:60},
         },
         audio:false,
       });
@@ -1567,7 +1576,7 @@ export function Transfer() {
           </div>
         </div>}
         {(fountain||compat)&&<div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Automatic speed<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On</option><option value="off">Off</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Sharing speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="300">Very fast</option><option value="450">Fast</option><option value="500">Fast + stable</option><option value="700">Balanced</option><option value="1000">Reliable</option><option value="1300">Extra reliable</option><option value="1600">Most reliable</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Behind the scenes</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Screen update</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>File per screen</b><p className="mt-1 text-[var(--text-muted)]">{fountain ? FOUNTAIN_BLOCK_BYTES + ' bytes/block' : (compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME) + ' raw bytes/frame · 1× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Codes on screen</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · The app chooses the screen layout automatically.</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Missed parts</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Extra recovery':'Simple sharing'}</p></div></div>}
+          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Automatic speed<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On</option><option value="off">Off</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Sharing speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="35">Extreme</option><option value="45">Very fast</option><option value="60">Fast</option><option value="80">Balanced</option><option value="120">Reliable</option><option value="180">Extra reliable</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Behind the scenes</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Screen update</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>File per screen</b><p className="mt-1 text-[var(--text-muted)]">{fountain ? FOUNTAIN_BLOCK_BYTES + ' bytes/block' : (compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME) + ' raw bytes/frame · 1× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Codes on screen</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · The app chooses the screen layout automatically.</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Missed parts</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Extra recovery':'Simple sharing'}</p></div></div>}
         </>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
