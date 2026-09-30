@@ -46,7 +46,7 @@ function drawMatrixToCanvas(
 }
 
 function toMatrix(value: string): QrMatrix {
-  const code = QRCode.create(value, { errorCorrectionLevel: 'L' }) as unknown as QRCodeMatrix;
+  const code = QRCode.create(value, { errorCorrectionLevel: 'L', maskPattern: 4 }) as unknown as QRCodeMatrix;
   const raw = code.modules.data;
   return {
     size: code.modules.size,
