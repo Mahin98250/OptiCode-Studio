@@ -691,3 +691,98 @@ textarea, input, select {
 :root[data-theme='light'] .animate-shimmer {
   background-image: linear-gradient(110deg, transparent 25%, rgba(79,70,229,.08) 45%, rgba(79,70,229,.16) 50%, rgba(79,70,229,.08) 55%, transparent 75%);
 }
+
+
+/* Fluid navigation physics */
+.nav-fluid-pill {
+  z-index: 0;
+  transform: translateZ(0);
+  will-change: transform, width, height;
+  contain: layout paint;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.nav-fluid-pill-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 28% 18%, rgba(255,255,255,.48), transparent 34%),
+    radial-gradient(circle at 76% 88%, rgba(99,102,241,.16), transparent 48%);
+  opacity: .56;
+  mix-blend-mode: screen;
+}
+
+.nav-fluid-pill-specular {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    120deg,
+    rgba(255,255,255,.56) 0%,
+    rgba(255,255,255,.13) 28%,
+    transparent 54%,
+    rgba(255,255,255,.18) 78%,
+    rgba(255,255,255,.46) 100%
+  );
+  opacity: .72;
+  transform: translate3d(-24%, 0, 0) scaleX(.82);
+}
+
+.nav-fluid-item {
+  -webkit-user-select: none;
+  user-select: none;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+.nav-fluid-item:active .nav-fluid-touch-feedback {
+  opacity: .26 !important;
+  transform: scale(.96);
+}
+
+.nav-fluid-touch-feedback {
+  border: 1px solid rgba(255,255,255,.24);
+  background: rgba(255,255,255,.28);
+  transform: translateZ(0);
+  transition:
+    opacity 120ms ease,
+    transform 180ms cubic-bezier(.18,.9,.25,1.18);
+}
+
+@media (hover:hover) and (pointer:fine) {
+  .nav-fluid-item:hover .nav-fluid-touch-feedback {
+    opacity: .08;
+  }
+}
+
+@media (max-width: 767px) {
+  .mobile-bottom-nav {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding-bottom: 0;
+    transform: translateZ(0);
+    will-change: transform;
+    contain: layout paint style;
+  }
+
+  .mobile-bottom-nav > .glass-panel {
+    overflow: hidden;
+    isolation: isolate;
+    transform: translateZ(0);
+    will-change: transform;
+    contain: layout paint;
+    border-color: rgba(255,255,255,.14);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-fluid-pill,
+  .nav-fluid-item,
+  .nav-fluid-touch-feedback {
+    transition: none !important;
+    animation: none !important;
+  }
+}
