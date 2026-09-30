@@ -749,7 +749,7 @@ async function opticalFountainLossRecoveryDiagnostic() {
     Math.ceil((plan.totalBlocks + Math.ceil(plan.totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD)) / 4),
   );
 
-  const packets: ReturnType<typeof parseOpticalFountainFrame>[] = [];
+  const packets: Array<NonNullable<ReturnType<typeof parseOpticalFountainFrame>>> = [];
   const passes = 2;
   for (let pass = 0; pass < passes; pass += 1) {
     for (let group = 0; group < groupsPerPass; group += 1) {
@@ -765,15 +765,15 @@ async function opticalFountainLossRecoveryDiagnostic() {
   }
 
   const delivery = packets.sort((a, b) => {
-    const av = (a!.kind === 'data' ? a.seed : 0) >>> 0;
-    const bv = (b!.kind === 'data' ? b.seed : 0) >>> 0;
+    const av = (a.kind === 'data' ? a.seed : 0) >>> 0;
+    const bv = (b.kind === 'data' ? b.seed : 0) >>> 0;
     return ((av ^ (av >>> 16)) - (bv ^ (bv >>> 16)));
   });
 
   const decoder = new OpticalFountainDecoder();
   let duplicates = 0;
   for (const frame of delivery) {
-    const result = decoder.add(frame!);
+    const result = decoder.add(frame);
     if (result.duplicate) duplicates += 1;
     if (result.complete) break;
   }
