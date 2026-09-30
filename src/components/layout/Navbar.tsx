@@ -79,7 +79,7 @@ export function Navbar() {
                       </motion.span>
                     )}
                     <motion.span
-                      className={\`relative z-10 inline-flex items-center gap-1.5 \${active ? 'text-[var(--nav-active-text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]]'\`}
+                      className={`relative z-10 inline-flex items-center gap-1.5 ${active ? 'text-[var(--nav-active-text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}
                       animate={{
                         scale: active ? 1.015 : 1,
                         y: active ? -0.15 : 0,
@@ -144,7 +144,7 @@ export function Navbar() {
                   </motion.span>
                 )}
                 <motion.span
-                  className={\`relative z-10 \${active ? 'text-[var(--nav-active-text)]' : 'text-[var(--text-muted)]'}\`}
+                  className={`relative z-10 ${active ? 'text-[var(--nav-active-text)]' : 'text-[var(--text-muted)]'}`}
                   animate={{
                     scale: active ? 1.08 : 1,
                     y: active ? -1 : 0,
@@ -154,7 +154,7 @@ export function Navbar() {
                   <Icon size={18} strokeWidth={active ? 2.7 : 2} />
                 </motion.span>
                 <motion.span
-                  className={\`relative z-10 max-w-full truncate \${active ? 'text-slate-950' : 'text-[var(--text-muted)]'}\`}
+                  className={`relative z-10 max-w-full truncate ${active ? 'text-slate-950' : 'text-[var(--text-muted)]'}`}
                   animate={{
                     opacity: active ? 1 : 0.88,
                   }}
