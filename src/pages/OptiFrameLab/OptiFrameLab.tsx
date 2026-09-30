@@ -120,6 +120,7 @@ export function OptiFrameLab() {
   const senderLastPaintAtRef = useRef(0);
   const senderGroupRef = useRef(0);
   const senderCadenceAtRef = useRef(0);
+  const streamIndexValueRef = useRef(0);
   const senderSurfaceCacheRef = useRef(new Map<string, HTMLCanvasElement>());
   const assemblerRef = useRef(new OptiFrameAssembler());
   const opticalFountainDecoderRef = useRef(new OpticalFountainDecoder());
@@ -173,6 +174,10 @@ export function OptiFrameLab() {
   }, []);
 
   useEffect(() => {
+    streamIndexValueRef.current = streamIndex;
+  }, [streamIndex]);
+
+  useEffect(() => {
     streamFrameCacheRef.current.clear();
   }, [streamPayload.length, opticalFountainPlan?.session]);
 
@@ -194,7 +199,7 @@ export function OptiFrameLab() {
       return;
     }
 
-    senderGroupRef.current = Math.floor(streamIndex / laneCount);
+    senderGroupRef.current = Math.floor(streamIndexValueRef.current / laneCount);
     senderLastPaintAtRef.current = 0;
     senderSurfaceCacheRef.current.clear();
 
@@ -261,10 +266,10 @@ export function OptiFrameLab() {
       if (senderRafRef.current !== null && streamIntervalMs <= 0) {
         return;
       }
-      const last = senderLastPaintAtRef.current;
-      if (last === 0 || now - last >= streamIntervalMs) {
-        // senderLastPaintAtRef is reused for UI throttling above, so derive
-        // cadence from a dedicated timestamp local to this loop.
+      if (
+        senderCadenceAtRef.current === 0 ||
+        now - senderCadenceAtRef.current >= streamIntervalMs
+      ) {
         drawDirect(senderGroupRef.current);
         senderGroupRef.current = (senderGroupRef.current + 1) % streamGroupCount;
         senderCadenceAtRef.current = now;
@@ -273,6 +278,7 @@ export function OptiFrameLab() {
     };
 
     senderCadenceAtRef.current = 0;
+    senderLastPaintAtRef.current = performance.now();
     senderRafRef.current = window.requestAnimationFrame((now) => {
       if (senderCadenceAtRef.current === 0 || now - senderCadenceAtRef.current >= streamIntervalMs) {
         drawDirect(senderGroupRef.current);
