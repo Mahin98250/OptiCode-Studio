@@ -3,7 +3,7 @@ import { analyzeScan } from './scan';
 import { QrEncodePool } from './qrEncodePool';
 import { QrDecodePool } from './qrDecodePool';
 import { createQrMatrices, drawQrMatricesToCanvas } from './qrCanvas';
-import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, getOptiFrameCapacity, OPTIFRAME_SIZE, optiFrameSelfTest } from './optiframe';
+import { decodeOptiFrame, decodeOptiFrameDense4, decodeOptiFramePerspective, encodeOptiFrame, encodeOptiFrameDense4, getOptiFrameCapacity, getOptiFrameDense4Capacity, OPTIFRAME_SIZE, optiFrameSelfTest } from './optiframe';
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from './optiframeStream';
 import { cropOptiLaneGrid, createOptiFrameCanvasCache, createOptiLaneSurface, getOptiLaneLayout, type OptiLaneCount } from './optiframeLanes';
 import { OptiFrameDecodePool } from './optiframeDecodePool';
@@ -685,6 +685,19 @@ async function optiFrameMultiLaneRoundTrip() {
   assert(cache.size() === 0, 'OptiFrame canvas cache did not clear.');
 
   return '1×/2×/4×/6×/9×/12×/16× lane surfaces cropped/decoded · bounded encoded-frame cache reuse verified';
+}
+
+async function optiFrameDense4RoundTripDiagnostic() {
+  const payload = makeBytes(getOptiFrameDense4Capacity(), 311);
+  const encoded = encodeOptiFrameDense4(payload, 19, 77);
+  const decoded = decodeOptiFrameDense4(encoded.canvas);
+  assert(decoded, 'Dense 4-bit axis-aligned decode returned no frame.');
+  assert(decoded.version === 3 && decoded.sequence === 19 && decoded.total === 77, 'Dense 4-bit metadata mismatch.');
+  expectEqualBytes(decoded.payload, payload, 'Dense 4-bit payload');
+  const perspective = decodeOptiFramePerspective(encoded.canvas);
+  assert(!perspective, 'Legacy 2-bit perspective decoder accepted a dense 4-bit frame.');
+
+  return getOptiFrameDense4Capacity() + '-byte dense payload · 16 luminance levels · CRC-32 verified';
 }
 
 async function optiFrameEncodeThroughputDiagnostic() {
