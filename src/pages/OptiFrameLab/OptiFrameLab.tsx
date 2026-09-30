@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Camera, CameraOff, CheckCircle2, Copy, Crosshair, Download, FlaskConical, Maximize2, Minimize2, Pause, Play, RotateCcw, ScanLine, Timer, Upload, Zap } from 'lucide-react';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { GlassButton } from '../../components/ui/GlassButton';
-import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, getOptiFrameCapacity, inspectOptiFrameAcquisition, OPTIFRAME_SIZE, type OptiFrameAcquisitionDiagnostics, type OptiFramePerspectiveDiagnostics } from '../../lib/optiframe';
+import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, getOptiFrameCapacity, inspectOptiFrameAcquisition, OPTIFRAME_SIZE, type OptiFrame, type OptiFrameAcquisitionDiagnostics, type OptiFramePerspectiveDiagnostics } from '../../lib/optiframe';
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from '../../lib/optiframeStream';
 import { OptiFrameDecodePool } from '../../lib/optiframeDecodePool';
 import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
 import { createOptiFrameCanvasCache, createOptiLaneSurface, cropOptiLaneGrid, type OptiLaneCount } from '../../lib/optiframeLanes';
 import { createOptiCodeFileTransfer, decodeOptiCodeFileTransfer, type OptiCodeFileTransfer } from '../../lib/opticodeTransfer';
+import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_OVERHEAD, parseOpticalFountainFrame, type OpticalFountainPlan } from '../../lib/opticalFountain';
 
 type CameraStats = {
   attempts: number;
@@ -106,6 +107,7 @@ export function OptiFrameLab() {
   const [streamIntervalMs, setStreamIntervalMs] = useState(300);
   const [transferFile, setTransferFile] = useState<File | null>(null);
   const [transferData, setTransferData] = useState<Uint8Array | null>(null);
+  const [opticalFountainPlan, setOpticalFountainPlan] = useState<OpticalFountainPlan | null>(null);
   const [receivedFile, setReceivedFile] = useState<OptiCodeFileTransfer | null>(null);
   const [receivedFileUrl, setReceivedFileUrl] = useState('');
 
@@ -115,6 +117,7 @@ export function OptiFrameLab() {
   const loopRef = useRef<number | null>(null);
   const senderTimerRef = useRef<number | null>(null);
   const assemblerRef = useRef(new OptiFrameAssembler());
+  const opticalFountainDecoderRef = useRef(new OpticalFountainDecoder());
   const decodePoolRef = useRef(new OptiFrameDecodePool());
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -129,11 +132,31 @@ export function OptiFrameLab() {
   const receivedFileUrlRef = useRef('');
   const streamFrameCacheRef = useRef(createOptiFrameCanvasCache(96));
   const adaptiveTransmissionRef = useRef(createAdaptiveTransmission(80));
+  const opticalDecodeInFlightRef = useRef(0);
 
   const streamPayload = useMemo(() => {
+    if (opticalFountainPlan) return [] as Uint8Array[];
     const payload = transferData ?? new TextEncoder().encode(text);
     return splitOptiFramePayload(payload, capacity);
-  }, [text, transferData, capacity]);
+  }, [text, transferData, capacity, opticalFountainPlan]);
+
+  const streamGroupCount = useMemo(() => {
+    if (opticalFountainPlan) {
+      return Math.max(
+        1,
+        Math.ceil(
+          (opticalFountainPlan.totalBlocks + Math.ceil(opticalFountainPlan.totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD))
+          / laneCount,
+        ),
+      );
+    }
+    return Math.max(1, Math.ceil(streamPayload.length / laneCount));
+  }, [opticalFountainPlan, streamPayload.length, laneCount]);
+
+  const streamFrameCount = useMemo(
+    () => Math.max(1, streamGroupCount * laneCount),
+    [streamGroupCount, laneCount],
+  );
 
   useEffect(() => {
     return () => {
@@ -145,15 +168,14 @@ export function OptiFrameLab() {
 
   useEffect(() => {
     streamFrameCacheRef.current.clear();
-  }, [streamPayload]);
+  }, [streamPayload.length, opticalFountainPlan?.session]);
 
   useEffect(() => {
     setStreamIndex(index => {
-      const length = Math.max(1, streamPayload.length);
       const group = Math.floor(index / laneCount);
-      return (group * laneCount) % length;
+      return (group * laneCount) % streamFrameCount;
     });
-  }, [streamPayload.length, laneCount]);
+  }, [streamFrameCount, laneCount]);
 
   useEffect(() => {
     if (!streamPlaying) {
@@ -161,7 +183,7 @@ export function OptiFrameLab() {
       return;
     }
     senderTimerRef.current = window.setInterval(() => {
-      setStreamIndex(index => (index + laneCount) % Math.max(1, streamPayload.length));
+      setStreamIndex(index => (index + laneCount) % streamFrameCount);
     }, streamIntervalMs);
     return () => {
       if (senderTimerRef.current !== null) window.clearInterval(senderTimerRef.current);
@@ -171,14 +193,23 @@ export function OptiFrameLab() {
 
   const streamSurface = useMemo(() => {
     try {
-      const payloads = Array.from({ length: laneCount }, (_, lane) =>
-        streamPayload[(streamIndex + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
-      );
-      return createOptiLaneSurface(payloads, streamIndex, Math.max(1, streamPayload.length), laneCount, streamFrameCacheRef.current).canvas;
+      const group = Math.floor(streamIndex / laneCount);
+      const payloads = opticalFountainPlan
+        ? Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount))
+        : Array.from({ length: laneCount }, (_, lane) =>
+            streamPayload[(streamIndex + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
+          );
+      return createOptiLaneSurface(
+        payloads,
+        group,
+        streamGroupCount,
+        laneCount,
+        streamFrameCacheRef.current,
+      ).canvas;
     } catch {
       return null;
     }
-  }, [streamPayload, streamIndex, laneCount]);
+  }, [streamPayload, streamIndex, laneCount, streamGroupCount, opticalFountainPlan]);
 
   useEffect(() => {
     const drawSurface = (target: HTMLCanvasElement | null) => {
@@ -285,9 +316,14 @@ export function OptiFrameLab() {
     acquisitionTestRef.current = false;
     setAcquisitionTest(previous => ({ ...previous, running: false }));
     if (loopRef.current !== null) {
-      window.clearTimeout(loopRef.current);
+      const video = videoRef.current as (HTMLVideoElement & {
+        cancelVideoFrameCallback?: (handle: number) => void;
+      }) | null;
+      if (video?.cancelVideoFrameCallback) video.cancelVideoFrameCallback(loopRef.current);
+      else window.clearTimeout(loopRef.current);
       loopRef.current = null;
     }
+    opticalDecodeInFlightRef.current = 0;
     for (const track of streamRef.current?.getTracks() ?? []) track.stop();
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -297,16 +333,27 @@ export function OptiFrameLab() {
   async function selectTransferFile(file?: File) {
     if (!file) return;
     try {
-      setStatus('Preparing ' + file.name + ' for optical transfer…');
-      const payload = await createOptiCodeFileTransfer(file);
+      setStatus('Preparing ' + file.name + ' for binary optical fountain transfer…');
+      const plan = await createOpticalFountainTransfer(file);
       setTransferFile(file);
-      setTransferData(payload);
+      setTransferData(null);
+      setOpticalFountainPlan(plan);
       setStreamIndex(0);
       setStreamPlaying(false);
-      setStatus(file.name + ' ready · ' + file.size.toLocaleString() + ' bytes · ' + Math.max(1, Math.ceil(payload.length / capacity)) + ' optical frames.');
+      setStatus(
+        file.name +
+        ' ready · ' +
+        file.size.toLocaleString() +
+        ' bytes · ' +
+        plan.totalBlocks.toLocaleString() +
+        ' source blocks · ' +
+        plan.blockBytes.toLocaleString() +
+        ' bytes/optical frame payload · binary 2-bit OptiFrame fountain enabled.',
+      );
     } catch (error) {
       setTransferFile(null);
       setTransferData(null);
+      setOpticalFountainPlan(null);
       setStatus(error instanceof Error ? error.message : 'Unable to prepare that file.');
     }
   }
@@ -314,6 +361,7 @@ export function OptiFrameLab() {
   function clearTransferFile() {
     setTransferFile(null);
     setTransferData(null);
+    setOpticalFountainPlan(null);
     setStreamPlaying(false);
     setStreamIndex(0);
     setStatus('File cleared. Text mode is active.');
@@ -334,6 +382,65 @@ export function OptiFrameLab() {
     setReceivedFile(null);
     setReceivedFileUrl('');
     setCameraDecoded(utf8ToText(payload));
+  }
+
+  async function consumeOpticalFountainFrames(frames: OptiFrame[]) {
+    const packets = frames
+      .map(frame => ({ frame, packet: parseOpticalFountainFrame(frame.payload) }))
+      .filter((entry): entry is { frame: OptiFrame; packet: NonNullable<ReturnType<typeof parseOpticalFountainFrame>> } => Boolean(entry.packet));
+
+    if (packets.length === 0) return null;
+
+    let latest = opticalFountainDecoderRef.current.snapshot(false);
+    let duplicateCount = 0;
+
+    for (const entry of packets) {
+      const activeSession = opticalFountainDecoderRef.current.snapshot(false).session;
+      if (activeSession && activeSession !== entry.packet.session) {
+        opticalFountainDecoderRef.current.reset();
+      }
+      const next = opticalFountainDecoderRef.current.add(entry.packet);
+      if (next.duplicate) duplicateCount += 1;
+      latest = next;
+    }
+
+    setReceiver({
+      total: latest.totalBlocks,
+      received: latest.receivedBlocks,
+      bytes: Math.min(latest.size, latest.bytesRecovered),
+      missing: [],
+      complete: latest.complete,
+    });
+
+    if (latest.complete) {
+      const rebuilt = await opticalFountainDecoderRef.current.reconstruct();
+      if (rebuilt) {
+        if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
+        const url = URL.createObjectURL(new Blob([rebuilt.bytes.buffer as ArrayBuffer], { type: rebuilt.mime }));
+        receivedFileUrlRef.current = url;
+        setReceivedFile({
+          name: rebuilt.name,
+          type: rebuilt.mime,
+          size: rebuilt.size,
+          data: rebuilt.bytes,
+        });
+        setReceivedFileUrl(url);
+        setCameraDecoded('');
+        setStatus('Binary fountain transfer complete · ' + rebuilt.name + ' · ' + rebuilt.size.toLocaleString() + ' bytes.');
+      }
+    } else {
+      setStatus(
+        'OptiFrame fountain · ' +
+        latest.receivedBlocks.toLocaleString() +
+        '/' +
+        latest.totalBlocks.toLocaleString() +
+        ' source blocks recovered · ' +
+        latest.seenPackets.toLocaleString() +
+        ' optical packets observed.',
+      );
+    }
+
+    return { latest, duplicateCount };
   }
 
   async function decodeCameraFrame() {
@@ -509,6 +616,31 @@ export function OptiFrameLab() {
         return;
       }
 
+      const fountainFastPath = await consumeOpticalFountainFrames(
+        successes.map(entry => entry.result!.frame),
+      );
+      if (fountainFastPath) {
+        const elapsedFromStart = cameraStats.startedAt
+          ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000)
+          : 0;
+        setCameraStats(prev => ({
+          ...prev,
+          attempts: prev.attempts + 1,
+          hits: prev.hits + successes.length,
+          duplicates: prev.duplicates + fountainFastPath.duplicateCount,
+          workerHits: prev.workerHits + successes.filter(entry => Boolean(entry.worker)).length,
+          localHits: prev.localHits + successes.filter(entry => !entry.worker).length,
+          dropped: prev.dropped + failedLanes,
+          lastMs: elapsed,
+          captureFps: elapsedFromStart ? (prev.attempts + 1) / elapsedFromStart : 0,
+          decodeFps: elapsedFromStart ? (prev.hits + successes.length) / elapsedFromStart : 0,
+          bytes: fountainFastPath.latest.bytesRecovered,
+          goodputBps: elapsedFromStart ? fountainFastPath.latest.bytesRecovered / elapsedFromStart : 0,
+          lastConfidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
+        }));
+        return;
+      }
+
       if (successes.some(entry => entry.result?.frame.sequence === 0) && receiver.complete) {
         seenSequenceRef.current.clear();
         assemblerRef.current.reset();
@@ -651,6 +783,20 @@ export function OptiFrameLab() {
     }
 
     const frame = result.frame;
+    const fountainFastPath = await consumeOpticalFountainFrames([frame]);
+    if (fountainFastPath) {
+      const elapsedFromStart = cameraStats.startedAt
+        ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000)
+        : 0;
+      const duplicate = fountainFastPath.duplicateCount > 0;
+      setCameraStats(prev => ({
+        ...prev,
+        duplicates: prev.duplicates + fountainFastPath.duplicateCount,
+        bytes: fountainFastPath.latest.bytesRecovered,
+        goodputBps: elapsedFromStart ? fountainFastPath.latest.bytesRecovered / elapsedFromStart : 0,
+      }));
+      return;
+    }
     if (frame.sequence === 0 && receiver.complete) {
       seenSequenceRef.current.clear();
       assemblerRef.current.reset();
@@ -694,6 +840,7 @@ export function OptiFrameLab() {
     stopCamera();
     setCameraError('');
     assemblerRef.current.reset();
+    opticalFountainDecoderRef.current.reset();
     seenSequenceRef.current.clear();
     trackedAnchorsRef.current = null;
     framesSinceFullScanRef.current = 0;
@@ -713,7 +860,7 @@ export function OptiFrameLab() {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
           aspectRatio: { ideal: 16 / 9 },
-          frameRate: { ideal: 30 },
+          frameRate: { ideal: 60, max: 60 },
         },
         audio: false,
       });
@@ -756,17 +903,28 @@ export function OptiFrameLab() {
       }
       setCameraOn(true);
 
-      const tick = async () => {
+      const tick = () => {
         if (!streamRef.current) return;
-        const started = performance.now();
-        await decodeCameraFrame();
-        const processingMs = performance.now() - started;
-        // Keep capture responsive without forcing a fixed cadence onto slower
-        // devices. The sender cadence is independently configurable.
-        const nextDelay = Math.max(140, Math.min(500, Math.round(processingMs * 1.35)));
-        loopRef.current = window.setTimeout(() => void tick(), nextDelay);
+        const maxInFlight = laneCount === 1
+          ? Math.min(3, Math.max(1, decodePoolRef.current.capacity))
+          : 2;
+        if (opticalDecodeInFlightRef.current < maxInFlight) {
+          opticalDecodeInFlightRef.current += 1;
+          void decodeCameraFrame().finally(() => {
+            opticalDecodeInFlightRef.current = Math.max(0, opticalDecodeInFlightRef.current - 1);
+          });
+        }
+
+        const video = videoRef.current as (HTMLVideoElement & {
+          requestVideoFrameCallback?: (callback: (now: number, metadata: VideoFrameCallbackMetadata) => void) => number;
+        }) | null;
+        if (video?.requestVideoFrameCallback) {
+          loopRef.current = video.requestVideoFrameCallback(() => tick());
+        } else {
+          loopRef.current = window.setTimeout(tick, 16);
+        }
       };
-      loopRef.current = window.setTimeout(() => void tick(), 140);
+      tick();
     } catch (error) {
       setCameraError(error instanceof DOMException ? error.message : 'Camera permission was denied or unavailable.');
       stopCamera();
@@ -849,11 +1007,11 @@ export function OptiFrameLab() {
           </div>
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Mode</p><p className="mt-1 text-sm font-black text-[var(--text)]">{transferFile ? 'FILE' : 'TEXT'}</p></div>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Mode</p><p className="mt-1 text-sm font-black text-[var(--text)]">{transferFile ? 'BINARY FOUNTAIN' : 'TEXT'}</p></div>
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Payload</p><p className="mt-1 text-sm font-black text-[var(--text)]">{(transferData?.length ?? new TextEncoder().encode(text).length).toLocaleString()} bytes</p></div>
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Frames</p><p className="mt-1 text-sm font-black text-[var(--text)]">{streamPayload.length}</p></div>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Frames</p><p className="mt-1 text-sm font-black text-[var(--text)]">{streamFrameCount.toLocaleString()}</p></div>
         </div>
-        {transferFile && <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4"><p className="text-xs font-black text-cyan-200">{transferFile.name}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{transferFile.type || 'application/octet-stream'} · {transferFile.size.toLocaleString()} bytes · ready to display on the sending device.</p></div>}
+        {transferFile && <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4"><p className="text-xs font-black text-cyan-200">{transferFile.name}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{transferFile.type || 'application/octet-stream'} · {transferFile.size.toLocaleString()} bytes · binary fountain · {opticalFountainPlan?.totalBlocks.toLocaleString() ?? '—'} source blocks · ready for high-speed optical streaming.</p></div>}
       </GlassCard>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
@@ -880,7 +1038,7 @@ export function OptiFrameLab() {
         <GlassCard>
           <div className="flex items-center justify-between gap-3">
             <div><p className="text-sm font-bold text-[var(--text)]">Sharing screen</p><p className="mt-1 text-[10px] uppercase tracking-[.14em] text-[var(--text-muted)]">{OPTIFRAME_SIZE}×{OPTIFRAME_SIZE} protocol · 1× renders 768 px · 2×/4× render 384 px lanes</p></div>
-            <span className="rounded-full border border-[var(--border)] px-3 py-2 text-[10px] font-bold text-[var(--text-muted)]">{streamPayload.length} stream frame{streamPayload.length === 1 ? '' : 's'}</span>
+            <span className="rounded-full border border-[var(--border)] px-3 py-2 text-[10px] font-bold text-[var(--text-muted)]">{streamFrameCount.toLocaleString()} stream positions</span>
           </div>
           <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Multiple codes</p><p className="mt-1 text-xs text-[var(--text-muted)]">The screen can show more than one code at a time.</p></div><div className="flex rounded-full border border-[var(--border)] p-1">{([1, 2, 4] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div></div>
           <div className="mt-5 grid place-items-center rounded-[26px] bg-white p-4">
@@ -909,8 +1067,8 @@ export function OptiFrameLab() {
                 <option value={500}>500 ms</option>
               </select>
             </label>
-            <button onClick={() => setStreamIndex(index => (index + streamPayload.length - laneCount) % Math.max(1, streamPayload.length))} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Previous</button>
-            <button onClick={() => setStreamIndex(index => (index + laneCount) % Math.max(1, streamPayload.length))} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Next</button>
+            <button onClick={() => setStreamIndex(index => (index + streamFrameCount - laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Previous</button>
+            <button onClick={() => setStreamIndex(index => (index + laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Next</button>
           </div>
           <p className="mt-3 text-xs text-[var(--text-muted)]">{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${laneCount === 2 ? '2:1' : '1:1'} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
         </GlassCard>
