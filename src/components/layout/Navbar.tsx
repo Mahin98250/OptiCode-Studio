@@ -17,11 +17,11 @@ const links = [
 ];
 
 const mobileLinks = [
-  { to: '/', label: 'Home', icon: Home },
-  { to: '/generator', label: 'Create', icon: QrCode },
-  { to: '/scanner', label: 'Scan', icon: ScanLine },
-  { to: '/tools', label: 'More', icon: Wrench },
-  { to: '/transfer', label: 'Send files', icon: Zap },
+  { to: '/', label: 'Home', icon: Home, tone: 'nav-tone-cyan' },
+  { to: '/generator', label: 'Create', icon: QrCode, tone: 'nav-tone-amber' },
+  { to: '/scanner', label: 'Scan', icon: ScanLine, tone: 'nav-tone-violet' },
+  { to: '/tools', label: 'More', icon: Wrench, tone: 'nav-tone-blue' },
+  { to: '/transfer', label: 'Send', icon: Zap, tone: 'nav-tone-rose' },
 ];
 
 const springTransition = {
@@ -123,51 +123,68 @@ export function Navbar() {
       </header>
 
       <nav className="mobile-bottom-nav fixed inset-x-2 bottom-2 z-[60]" aria-label="Primary">
-        <div className="glass-panel relative mx-auto grid max-w-md grid-cols-5 rounded-[24px] p-1.5 shadow-2xl">
-          {mobileLinks.map(({ to, label, icon: Icon }) => {
+        <div className="glass-panel nav-fluid-dock relative mx-auto flex max-w-md items-center justify-between rounded-[27px] p-1.5 shadow-2xl">
+          {mobileLinks.map(({ to, label, icon: Icon, tone }) => {
             const active = location.pathname === to;
             return (
               <Link
                 key={to}
                 to={to}
                 aria-current={active ? 'page' : undefined}
-                className="nav-fluid-item group relative z-10 flex min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 py-2 text-[9px] font-bold"
+                className={`nav-fluid-item relative flex h-12 min-w-0 items-center justify-center rounded-full px-2.5 text-[10px] font-bold ${active ? 'nav-fluid-item-active' : ''}`}
               >
                 {active && (
                   <motion.span
-                    layoutId="mobile-nav-fluid-pill"
-                    className="nav-fluid-pill absolute inset-0 rounded-[18px] bg-white shadow-[0_8px_24px_rgba(0,0,0,.18)]"
+                    layoutId="mobile-nav-liquid-capsule"
+                    className={`nav-liquid-capsule absolute inset-y-0 left-0 right-0 rounded-full ${tone}`}
                     transition={springTransition}
                   >
-                    <span className="nav-fluid-pill-glow" />
-                    <span className="nav-fluid-pill-specular" />
+                    <span className="nav-liquid-aura" />
+                    <span className="nav-liquid-surface" />
+                    <span className="nav-liquid-edge" />
                   </motion.span>
                 )}
+
                 <motion.span
-                  className={`relative z-10 ${active ? 'text-[var(--nav-active-text)]' : 'text-[var(--text-muted)]'}`}
+                  className={`relative z-10 flex items-center ${active ? 'gap-2' : ''}`}
                   animate={{
-                    scale: active ? 1.08 : 1,
-                    y: active ? -1 : 0,
+                    scale: active ? 1 : 0.96,
                   }}
                   transition={iconSpring}
                 >
-                  <Icon size={18} strokeWidth={active ? 2.7 : 2} />
+                  <motion.span
+                    className={`nav-liquid-orb relative grid shrink-0 place-items-center rounded-full ${active ? 'nav-liquid-orb-active' : ''}`}
+                    animate={{
+                      width: active ? 39 : 34,
+                      height: active ? 39 : 34,
+                    }}
+                    transition={iconSpring}
+                  >
+                    <span className={`nav-liquid-orb-ring absolute inset-0 rounded-full ${active ? 'opacity-100' : 'opacity-0'}`} />
+                    <Icon size={active ? 17 : 18} strokeWidth={active ? 2.5 : 2} />
+                  </motion.span>
+
+                  <motion.span
+                    className={`nav-liquid-label overflow-hidden whitespace-nowrap ${active ? 'max-w-[72px]' : 'max-w-0'}`}
+                    animate={{
+                      opacity: active ? 1 : 0,
+                      x: active ? 0 : -5,
+                    }}
+                    transition={iconSpring}
+                  >
+                    {label}
+                  </motion.span>
                 </motion.span>
-                <motion.span
-                  className={`relative z-10 max-w-full truncate ${active ? 'text-slate-950' : 'text-[var(--text-muted)]'}`}
-                  animate={{
-                    opacity: active ? 1 : 0.88,
-                  }}
-                  transition={iconSpring}
-                >
-                  {label}
-                </motion.span>
-                <span className="nav-fluid-touch-feedback pointer-events-none absolute inset-1 rounded-[15px]" />
+
+                {!active && (
+                  <span className="nav-fluid-idle-label pointer-events-none absolute -bottom-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px]">
+                    {label}
+                  </span>
+                )}
               </Link>
             );
           })}
         </div>
-      </nav>
-    </>
+      </nav>    </>
   );
 }
