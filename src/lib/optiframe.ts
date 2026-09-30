@@ -392,6 +392,75 @@ function finderQuickScore(image: ImageData, cx: number, cy: number, moduleScale:
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
 
+function searchAllFinders(image: ImageData) {
+  const width = image.width;
+  const height = image.height;
+  const minDim = Math.min(width, height);
+  const expectedScale = minDim / OPTIFRAME_SIZE;
+  const minScale = Math.max(0.75, expectedScale * 0.22);
+  const maxScale = Math.min(24, Math.max(minScale + 2, expectedScale * 2.2));
+  const coarseScaleStep = Math.max(1.0, expectedScale * 0.16);
+  const coarseSpatialStep = Math.max(5, Math.min(12, Math.round(Math.max(2, expectedScale * 0.9))));
+
+  type Candidate = { x: number; y: number; score: number; scale: number; angle: number };
+  const buckets: Candidate[][] = [[], [], [], []];
+  const retain = (bucket: Candidate[], candidate: Candidate) => {
+    if (bucket.length < 8) {
+      bucket.push(candidate);
+      return;
+    }
+    let weakest = 0;
+    for (let i = 1; i < bucket.length; i += 1) {
+      if (bucket[i].score < bucket[weakest].score) weakest = i;
+    }
+    if (candidate.score > bucket[weakest].score) bucket[weakest] = candidate;
+  };
+
+  const scanAngles = (angles: readonly number[]) => {
+    for (const angle of angles) {
+      for (let scale = minScale; scale <= maxScale; scale += coarseScaleStep) {
+        for (let y = 4; y < height - 4; y += coarseSpatialStep) {
+          const row = y < height / 2 ? 0 : 2;
+          for (let x = 4; x < width - 4; x += coarseSpatialStep) {
+            const score = finderCoarseScore(image, x, y, scale, angle);
+            if (score <= 0.42) continue;
+            const quadrant = row + (x < width / 2 ? 0 : 1);
+            retain(buckets[quadrant], { x, y, score, scale, angle });
+          }
+        }
+      }
+    }
+  };
+
+  scanAngles([0]);
+
+  const refineBucket = (bucket: Candidate[]) => {
+    let best: OptiFrameAnchor | null = null;
+    for (const candidate of bucket) {
+      const score = finderScore(image, candidate.x, candidate.y, candidate.scale, candidate.angle);
+      if (score > (best?.score ?? 0)) {
+        best = { x: candidate.x, y: candidate.y, score, scale: candidate.scale, angle: candidate.angle };
+      }
+    }
+    return best;
+  };
+
+  let anchors = buckets.map(refineBucket) as Array<OptiFrameAnchor | null>;
+  const needsRotation = anchors.some(anchor => !anchor || anchor.score < 0.82);
+  if (needsRotation) {
+    buckets.forEach(bucket => { bucket.length = 0; });
+    scanAngles([-20, -10, 10, 20]);
+    anchors = buckets.map(refineBucket) as Array<OptiFrameAnchor | null>;
+  }
+
+  return {
+    tl: anchors[0],
+    tr: anchors[1],
+    bl: anchors[2],
+    br: anchors[3],
+  };
+}
+
 function searchFinder(image: ImageData, corner: Corner) {
   const width = image.width;
   const height = image.height;
@@ -691,11 +760,13 @@ export function inspectOptiFrameAcquisition(source: CanvasImageSource | ImageDat
   const started = performance.now();
   const image = toImageData(source);
   if (!image) return { stage: 'image', anchors: [], confidence: 0, moduleScale: 0, angle: 0, geometryRatio: 0, sampleWidth: 0, sampleHeight: 0, elapsedMs: performance.now() - started };
-  const found: OptiFrameAnchor[] = [];
-  for (const corner of ['tl', 'tr', 'bl', 'br'] as const) {
-    const anchor = searchFinder(image, corner);
-    if (anchor) found.push(anchor);
-  }
+  const all = searchAllFinders(image);
+  const found: OptiFrameAnchor[] = [
+    all.tl,
+    all.tr,
+    all.bl,
+    all.br,
+  ].filter((anchor): anchor is OptiFrameAnchor => Boolean(anchor));
   const confidence = found.length ? found.reduce((sum, anchor) => sum + anchor.score, 0) / found.length : 0;
   const moduleScale = found.length ? found.reduce((sum, anchor) => sum + anchor.scale, 0) / found.length : 0;
   const angle = found.length ? found.reduce((sum, anchor) => sum + anchor.angle, 0) / found.length : 0;
@@ -740,13 +811,10 @@ export function decodeOptiFramePerspective(
   }
 
   // Full acquisition fallback is required for first lock and after tracker loss.
-  const tl = searchFinder(image, 'tl');
-  const tr = searchFinder(image, 'tr');
-  const bl = searchFinder(image, 'bl');
-  const br = searchFinder(image, 'br');
-  if (!tl || !tr || !bl || !br) return null;
+  const all = searchAllFinders(image);
+  if (!all.tl || !all.tr || !all.bl || !all.br) return null;
 
-  const anchors: PerspectiveAnchorSet = [tl, tr, bl, br];
+  const anchors: PerspectiveAnchorSet = [all.tl, all.tr, all.bl, all.br];
   const frame = decodePerspectiveFromAnchors(image, anchors);
   if (!frame) return null;
 
