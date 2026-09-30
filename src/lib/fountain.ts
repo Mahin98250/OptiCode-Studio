@@ -196,7 +196,18 @@ function indexesFor(seed: number, blocks: number, degree: number) {
 }
 
 function xorInto(target: Uint8Array, source: Uint8Array) {
-  for (let i = 0; i < target.length; i += 1) target[i] ^= source[i] || 0;
+  // Fountain coding spends most sender CPU time in XOR. Both the payload
+  // buffer and our 2 KiB block size are 32-bit aligned, so bulk word XOR is
+  // substantially cheaper than a byte-at-a-time loop on modern JS engines.
+  const words=Math.min(target.byteLength,source.byteLength)>>>2;
+  if(words>0){
+    const target32=new Uint32Array(target.buffer,target.byteOffset,words);
+    const source32=new Uint32Array(source.buffer,source.byteOffset,words);
+    for(let i=0;i<words;i+=1) target32[i]^=source32[i];
+  }
+  for(let i=words*4;i<Math.min(target.byteLength,source.byteLength);i+=1){
+    target[i]^=source[i];
+  }
 }
 
 function normalizeBlock(bytes: Uint8Array, blockBytes: number) {
