@@ -53,6 +53,7 @@ export type OpticalFountainPlan = {
   totalBlocks: number;
   blockBytes: number;
   cycleGroups: number;
+  getCycleGroups: (laneCount?: 1 | 2 | 4 | 6) => number;
   getFrame: (lane: number, group: number, laneCount: 1 | 2 | 4 | 6) => Uint8Array;
 };
 
@@ -430,6 +431,15 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
     return createDataPacket(sessionBytes, totalBlocks, OPTICAL_FOUNTAIN_BLOCK_BYTES, seed, degree, payload);
   };
 
+  const recommendedPackets = Math.max(
+    totalBlocks + 4,
+    Math.ceil(totalBlocks * (1 + OPTICAL_FOUNTAIN_OVERHEAD)),
+  );
+  const getCycleGroups = (laneCount: 1 | 2 | 4 | 6 = 4) => {
+    const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 ? laneCount : 4;
+    return Math.max(1, Math.ceil(recommendedPackets / activeLanes));
+  };
+
   return {
     session,
     hash: hex(digest),
@@ -438,7 +448,8 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
     size: file.size,
     totalBlocks,
     blockBytes: OPTICAL_FOUNTAIN_BLOCK_BYTES,
-    cycleGroups: Math.max(1, Math.ceil((totalBlocks + Math.ceil(totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD)) / 4)),
+    cycleGroups: getCycleGroups(4),
+    getCycleGroups,
     getFrame,
   };
 }
