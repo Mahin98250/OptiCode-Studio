@@ -4,9 +4,9 @@ const LEGACY_FOUNTAIN_PREFIX = 'ORF1:';
 // High-density optical source blocks. The 32-bit seed is deliberately
 // deterministic so long-running streams do not depend on Math.random() or
 // wrap/repeat after the recommended packet count.
-export const FOUNTAIN_BLOCK_BYTES = 1200;
+export const FOUNTAIN_BLOCK_BYTES = 2000;
 export const FOUNTAIN_GRID_SIZE = 4;
-export const FOUNTAIN_MAX_FILE_SIZE = 64 * 1024 * 1024;
+export const FOUNTAIN_MAX_FILE_SIZE = 512 * 1024 * 1024;
 export const FOUNTAIN_OVERHEAD = 0.18;
 
 const SYSTEMATIC_SEED_MASK = 0x80000000;
@@ -207,7 +207,7 @@ function normalizeBlock(bytes: Uint8Array, blockBytes: number) {
 
 export async function createFountainTransfer(file: File): Promise<FountainPlan> {
   if (file.size > FOUNTAIN_MAX_FILE_SIZE) {
-    throw new Error('High-speed fountain mode supports files up to 64 MB. Use compatibility mode for larger files.');
+    throw new Error('High-speed fountain mode supports files up to 512 MB.');
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
