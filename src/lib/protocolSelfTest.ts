@@ -746,13 +746,6 @@ async function opticalFountainRoundTripDiagnostic() {
   assert(firstCycleRepair?.kind === 'data' && secondCycleRepair?.kind === 'data', 'Optical fountain repair-cycle diagnostic did not select data repairs.');
   assert(firstCycleRepair.seed !== secondCycleRepair.seed, 'Optical fountain repair cycle reused the same seed.');
 
-  // Verify that the next fountain cycle preserves the systematic source sweep
-  // while generating a different repair seed.
-  const repairStart = Math.floor(plan.totalBlocks / 4) + 1;
-  const firstCycleRepair = parseOpticalFountainFrame(plan.getFrame(0, repairStart, 4));
-  const secondCycleRepair = parseOpticalFountainFrame(plan.getFrame(0, groups + repairStart, 4));
-  assert(firstCycleRepair?.kind === 'data' && secondCycleRepair?.kind === 'data', 'Fountain repair-cycle fixture did not select repair packets.');
-  assert(firstCycleRepair.seed !== secondCycleRepair.seed, 'Optical fountain repair cycle reused the same seed.');
   const rebuilt = await decoder.reconstruct();
   assert(rebuilt, 'Optical fountain did not reconstruct after complete systematic/coded transmission.');
   expectEqualBytes(rebuilt.bytes, original, 'Optical fountain round trip');
