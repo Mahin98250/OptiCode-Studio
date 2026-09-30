@@ -137,6 +137,7 @@ export function OptiFrameLab() {
   const trackedGridBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const trackedGridVelocityRef = useRef({ x: 0, y: 0 });
   const trackedGridLastAtRef = useRef(0);
+  const captureOriginRef = useRef({ x: 0, y: 0 });
   const framesSinceFullScanRef = useRef(0);
   const acquisitionFailureRef = useRef(0);
   const acquisitionTestRef = useRef(false);
@@ -584,10 +585,15 @@ export function OptiFrameLab() {
       trackedAnchorsRef.current &&
       framesSinceFullScanRef.current < reacquireEveryFrames;
 
-    let image: ImageData;
+    captureOriginRef.current = { x: 0, y: 0 };
+    if (capture.width !== width) capture.width = width;
+    if (capture.height !== height) capture.height = height;
+    context.imageSmoothingEnabled = false;
+    context.drawImage(video, 0, 0, width, height);
+    let image: ImageData = context.getImageData(0, 0, width, height);
+
     let directTrackedCrop: { image: ImageData; offsetX: number; offsetY: number } | null = null;
     let directTrackedGrid: { image: ImageData; offsetX: number; offsetY: number } | null = null;
-    captureOriginRef.current = { x: 0, y: 0 };
 
     const directGridTrackingAvailable =
       laneCount > 1 &&
@@ -661,19 +667,7 @@ export function OptiFrameLab() {
         );
         image = context.getImageData(0, 0, roiWidth, roiHeight);
         directTrackedCrop = { image, offsetX: x, offsetY: y };
-      } else {
-        if (capture.width !== width) capture.width = width;
-        if (capture.height !== height) capture.height = height;
-        context.imageSmoothingEnabled = false;
-        context.drawImage(video, 0, 0, width, height);
-        image = context.getImageData(0, 0, width, height);
       }
-    } else {
-      if (capture.width !== width) capture.width = width;
-      if (capture.height !== height) capture.height = height;
-      context.imageSmoothingEnabled = false;
-      context.drawImage(video, 0, 0, width, height);
-      image = context.getImageData(0, 0, width, height);
     }
 
     if (acquisitionTestRef.current) {
