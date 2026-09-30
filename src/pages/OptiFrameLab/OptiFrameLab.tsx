@@ -134,6 +134,8 @@ export function OptiFrameLab() {
   const opticalCaptureSequenceRef = useRef(0);
   const latestGeometrySequenceRef = useRef(0);
   const latestLaneGeometrySequenceRef = useRef(new Map<number, number>());
+  const trackedGridBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const trackedGridLastAtRef = useRef(0);
   const framesSinceFullScanRef = useRef(0);
   const acquisitionFailureRef = useRef(0);
   const acquisitionTestRef = useRef(false);
@@ -583,8 +585,82 @@ export function OptiFrameLab() {
 
     let image: ImageData;
     let directTrackedCrop: { image: ImageData; offsetX: number; offsetY: number } | null = null;
+    let directTrackedGrid: { image: ImageData; offsetX: number; offsetY: number } | null = null;
+    captureOriginRef.current = { x: 0, y: 0 };
 
-    if (directTrackingAvailable) {
+    const directGridTrackingAvailable =
+      laneCount > 1 &&
+      !acquisitionTestRef.current &&
+      trackedLaneAnchorsRef.current.size >= laneCount &&
+      framesSinceFullScanRef.current < reacquireEveryFrames;
+
+    if (directGridTrackingAvailable) {
+      const anchors = [...trackedLaneAnchorsRef.current.values()].flat();
+      const minX = Math.min(...anchors.map(anchor => anchor.x));
+      const maxX = Math.max(...anchors.map(anchor => anchor.x));
+      const minY = Math.min(...anchors.map(anchor => anchor.y));
+      const maxY = Math.max(...anchors.map(anchor => anchor.y));
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const measuredW = Math.max(OPTIFRAME_SIZE * 2, maxX - minX);
+      const measuredH = Math.max(OPTIFRAME_SIZE, maxY - minY);
+      const targetAspect = laneCount === 4 ? 1 : 2;
+      const padding = Math.max(30, Math.max(measuredW, measuredH) * 0.20);
+      let roiWidth = measuredW + padding * 2;
+      let roiHeight = measuredH + padding * 2;
+      if (roiWidth / Math.max(1, roiHeight) < targetAspect) roiWidth = roiHeight * targetAspect;
+      if (roiWidth / Math.max(1, roiHeight) > targetAspect) roiHeight = roiWidth / targetAspect;
+
+      // The stored bounds are already in the same scaled camera coordinate space.
+      // Keep the optimization bounded and leave enough safety margin for hand motion.
+      const nowGrid = performance.now();
+      const previousBounds = trackedGridBoundsRef.current;
+      if (previousBounds) {
+        const dtGrid = Math.max(0.016, Math.min(0.30, (nowGrid - trackedGridLastAtRef.current) / 1000));
+        const previousCenterX = previousBounds.x + previousBounds.width / 2;
+        const previousCenterY = previousBounds.y + previousBounds.height / 2;
+        const speedX = (centerX - previousCenterX) / dtGrid;
+        const speedY = (centerY - previousCenterY) / dtGrid;
+        const predictedX = centerX + Math.max(-800, Math.min(800, speedX)) * 0.045;
+        const predictedY = centerY + Math.max(-800, Math.min(800, speedY)) * 0.045;
+        roiWidth = Math.max(roiWidth, previousBounds.width * 0.98);
+        roiHeight = Math.max(roiHeight, previousBounds.height * 0.98);
+        trackedGridBoundsRef.current = {
+          x: predictedX - roiWidth / 2,
+          y: predictedY - roiHeight / 2,
+          width: roiWidth,
+          height: roiHeight,
+        };
+      } else {
+        trackedGridBoundsRef.current = {
+          x: centerX - roiWidth / 2,
+          y: centerY - roiHeight / 2,
+          width: roiWidth,
+          height: roiHeight,
+        };
+      }
+      trackedGridLastAtRef.current = nowGrid;
+
+      const bounds = trackedGridBoundsRef.current;
+      const x = Math.max(0, Math.min(width - bounds.width, Math.round(bounds.x)));
+      const y = Math.max(0, Math.min(height - bounds.height, Math.round(bounds.y)));
+      const roiW = Math.max(OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1), Math.min(width - x, Math.round(bounds.width)));
+      const roiH = Math.max(OPTIFRAME_SIZE, Math.min(height - y, Math.round(bounds.height)));
+
+      if (roiW >= OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1) && roiH >= OPTIFRAME_SIZE) {
+        if (capture.width !== roiW) capture.width = roiW;
+        if (capture.height !== roiH) capture.height = roiH;
+        context.imageSmoothingEnabled = false;
+        context.drawImage(video, x / scale, y / scale, roiW / scale, roiH / scale, 0, 0, roiW, roiH);
+        image = context.getImageData(0, 0, roiW, roiH);
+        directTrackedGrid = { image, offsetX: x, offsetY: y };
+        captureOriginRef.current = { x, y };
+      }
+    }
+
+    if (directTrackedGrid) {
+      // Skip the full-frame copy when the multi-lane geometry is already locked.
+    } else if (directTrackingAvailable) {
       const anchors = trackedAnchorsRef.current!;
       const minX = Math.min(...anchors.map(anchor => anchor.x));
       const maxX = Math.max(...anchors.map(anchor => anchor.x));
@@ -772,8 +848,8 @@ export function OptiFrameLab() {
           height: lane.image.height,
           previousAnchors: trackedLaneAnchorsRef.current.get(lane.lane)?.map(anchor => ({
             ...anchor,
-            x: anchor.x - lane.offsetX,
-            y: anchor.y - lane.offsetY,
+            x: anchor.x - captureOriginRef.current.x - lane.offsetX,
+            y: anchor.y - captureOriginRef.current.y - lane.offsetY,
           })) as OptiFramePerspectiveDiagnostics['anchors'] | undefined,
         })),
       );
@@ -851,8 +927,8 @@ export function OptiFrameLab() {
 
         const absoluteAnchors = result.diagnostics.anchors.map(anchor => ({
           ...anchor,
-          x: anchor.x + entry.lane.offsetX,
-          y: anchor.y + entry.lane.offsetY,
+          x: anchor.x + entry.lane.offsetX + captureOriginRef.current.x,
+          y: anchor.y + entry.lane.offsetY + captureOriginRef.current.y,
         })) as OptiFramePerspectiveDiagnostics['anchors'];
         const latestLaneSequence = latestLaneGeometrySequenceRef.current.get(entry.lane.lane) ?? 0;
         if (captureSequence >= latestLaneSequence) {
@@ -1050,6 +1126,8 @@ export function OptiFrameLab() {
     trackedLaneAnchorsRef.current.clear();
     latestGeometrySequenceRef.current = 0;
     latestLaneGeometrySequenceRef.current.clear();
+    trackedGridBoundsRef.current = null;
+    trackedGridLastAtRef.current = 0;
     opticalCaptureSequenceRef.current = 0;
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
