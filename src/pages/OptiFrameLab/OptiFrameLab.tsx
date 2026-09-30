@@ -1339,26 +1339,37 @@ export function OptiFrameLab() {
 
         <GlassCard>
           <div className="flex items-center justify-between gap-3">
-            <div><p className="text-sm font-bold text-[var(--text)]">Sharing screen</p><p className="mt-1 text-[10px] uppercase tracking-[.14em] text-[var(--text-muted)]">{OPTIFRAME_SIZE}×{OPTIFRAME_SIZE} protocol · 1× 720 px · 2×/4× 540 px lanes · 6× extreme 1080×720 3:2 surface</p></div>
+             <div><p className="text-sm font-bold text-[var(--text)]">Sharing screen</p><p className="mt-1 text-[10px] uppercase tracking-[.14em] text-[var(--text-muted)]">{OPTIFRAME_SIZE}×{OPTIFRAME_SIZE} optical tiles · up to 16 lanes · measured display {displayRefreshHz.toFixed(1)} Hz</p></div>
             <span className="rounded-full border border-[var(--border)] px-3 py-2 text-[10px] font-bold text-[var(--text-muted)]">{streamFrameCount.toLocaleString()} stream positions</span>
           </div>
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Multiple codes</p><p className="mt-1 text-xs text-[var(--text-muted)]">The screen can show more than one code at a time.</p></div><div className="flex rounded-full border border-[var(--border)] p-1">{([1, 2, 4, 6] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div></div>
+           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3">
+             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+               <div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Parallel optical lanes</p><p className="mt-1 text-xs text-[var(--text-muted)]">More lanes increase ideal bandwidth, but each tile gets smaller. Auto selects a display-size starting profile.</p></div>
+               <button onClick={() => { const next = recommendOptiLaneCount(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1); setLaneCount(next); setStatus('Auto lane profile selected: ' + next + '×.'); }} className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[10px] font-black text-cyan-200">Auto</button>
+             </div>
+             <div className="mt-3 flex flex-wrap gap-1 rounded-full border border-[var(--border)] p-1">{([1, 2, 4, 6, 9, 12, 16] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div>
+           </div>
           <div className="mt-5 grid place-items-center rounded-[26px] bg-white p-4">
             {streamSurface ? (
               <canvas
                 ref={streamCanvasRef}
-                aria-label="OptiFrame optical stream surface"
+                 aria-label={`OptiFrame ${laneCount} lane optical stream surface`}
+                 className="optiframe-surface block h-auto w-full max-w-[1080px]"
+                 style={{ aspectRatio: `${laneLayout.columns} / ${laneLayout.rows}` }}
                 className={`optiframe-surface block h-auto w-full max-w-[760px] ${getOptiLaneLayout(laneCount).columns === 3 ? 'aspect-[3/2]' : getOptiLaneLayout(laneCount).columns === 2 && getOptiLaneLayout(laneCount).rows === 1 ? 'aspect-[2/1]' : 'aspect-square'}`}
               />
-            ) : <div className={getOptiLaneLayout(laneCount).columns === 3 ? 'aspect-[3/2] w-full max-w-[760px]' : getOptiLaneLayout(laneCount).columns === 2 && getOptiLaneLayout(laneCount).rows === 1 ? 'aspect-[2/1] w-full max-w-[760px]' : 'aspect-square w-full max-w-[760px]'} />}
+             ) : <div className="w-full max-w-[1080px]" style={{ aspectRatio: `${laneLayout.columns} / ${laneLayout.rows}` }} />
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <GlassButton onClick={() => setStreamPlaying(value => !value)}>{streamPlaying ? <Pause size={14}/> : <Play size={14}/>} {streamPlaying ? 'Pause' : 'Start sharing'}</GlassButton>
-            {laneCount === 1 && <button onClick={() => setOpticalDisplayMode(true)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]"><Maximize2 size={14}/> Full screen</button>}
+             <button onClick={() => setOpticalDisplayMode(true)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]"><Maximize2 size={14}/> Full screen</button>
             <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]">
               Speed
               <select value={streamIntervalMs} onChange={event => setStreamIntervalMs(Number(event.target.value))} className="bg-transparent outline-none">
-                <option value={8}>8 ms · 120 Hz target</option>
+               <option value={4}>4 ms · max target</option>
+               <option value={6}>6 ms · high-speed target</option>
+               <option value={8}>8 ms · 120 Hz target</option>
+               <option value={12}>12 ms · 83 Hz target</option>
                 <option value={16}>16 ms · 60 Hz target</option>
                 <option value={24}>24 ms</option>
                 <option value={32}>32 ms</option>
@@ -1373,7 +1384,12 @@ export function OptiFrameLab() {
             <button onClick={() => setStreamIndex(index => (index + streamFrameCount - laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Previous</button>
             <button onClick={() => setStreamIndex(index => (index + laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Next</button>
           </div>
-          <p className="mt-3 text-xs text-[var(--text-muted)]">{transferFile ? 'High-speed file mode uses binary fountain packets directly inside each OptiFrame. Increase the lane count on both devices for higher physical throughput; actual goodput depends on screen refresh, camera exposure, focus and decoder latency. ' : ''}{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${getOptiLaneLayout(laneCount).columns + ':' + getOptiLaneLayout(laneCount).rows} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
+           <div className="mt-4 grid gap-3 sm:grid-cols-3">
+             <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-cyan-200">Measured display</p><p className="mt-1 text-lg font-black text-[var(--text)]">{displayRefreshHz.toFixed(1)} Hz</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">Browser paint cadence</p></div>
+             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Ideal optical pipe</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatRate(throughput.idealBytesPerSecond)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{laneCount} lanes × {effectiveRefreshHz.toFixed(1)} Hz × {capacity.toLocaleString()} B</p></div>
+             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">300 MB ideal time</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatTransferTime(throughput.secondsFor300MB)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">No camera loss / no FEC overhead</p></div>
+           </div>
+           <p className="mt-3 text-xs text-[var(--text-muted)]">{transferFile ? 'High-speed file mode uses binary fountain packets directly inside each OptiFrame. More lanes increase the theoretical pipe, while actual goodput is bounded by the sender display, receiver camera, exposure, focus, decoder latency and packet loss. ' : ''}{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once on a ${laneLayout.columns}:${laneLayout.rows} grid and sends the complete lane batch to the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
         </GlassCard>
       </div>
 
@@ -1381,7 +1397,7 @@ export function OptiFrameLab() {
         <div className="fixed inset-0 z-[100] flex min-h-0 flex-col bg-white p-2 sm:p-4">
           <div className="flex items-center justify-between gap-3 text-slate-900">
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[.18em] text-cyan-700">OptiFrame 1× optical display</p>
+               <p className="text-[10px] font-black uppercase tracking-[.18em] text-cyan-700">OptiFrame {laneCount}× optical display</p>
               <p className="text-xs font-bold">Fill this screen with the frame. Keep all four finder anchors visible to the receiver.</p>
             </div>
             <button onClick={() => setOpticalDisplayMode(false)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-900 shadow-sm"><Minimize2 size={14}/> Exit</button>
@@ -1389,7 +1405,7 @@ export function OptiFrameLab() {
           <div className="min-h-0 flex-1 grid place-items-center py-2">
             <canvas
               ref={presentationCanvasRef}
-              aria-label="Fullscreen OptiFrame 1x optical display"
+               aria-label={`Fullscreen OptiFrame ${laneCount} lane optical display`}
               className="block h-auto max-h-full w-auto max-w-full"
             />
           </div>
