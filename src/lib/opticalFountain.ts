@@ -381,10 +381,6 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
 
   const totalBlocks = Math.max(1, Math.ceil(file.size / OPTICAL_FOUNTAIN_BLOCK_BYTES));
   const degreeCdf = robustSolitonCdf(totalBlocks);
-  const cycleGroups = Math.max(
-    1,
-    Math.ceil((totalBlocks + Math.ceil(totalBlocks * OPTICAL_FOUNTAIN_OVERHEAD)) / 4),
-  );
 
   const getFrame = (lane = 0, group = 0, laneCount: 1 | 2 | 4 | 6 = 4) => {
     const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 ? laneCount : 4;
