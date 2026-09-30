@@ -1175,8 +1175,13 @@ export function OptiFrameLab() {
 
   function resetReceiver() {
     assemblerRef.current.reset();
+    opticalFountainDecoderRef.current.reset();
     seenSequenceRef.current.clear();
     trackedAnchorsRef.current = null;
+    trackedLaneAnchorsRef.current.clear();
+    latestGeometrySequenceRef.current = 0;
+    latestLaneGeometrySequenceRef.current.clear();
+    opticalCaptureSequenceRef.current = 0;
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
     setCameraDecoded('');
