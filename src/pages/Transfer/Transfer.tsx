@@ -1086,11 +1086,20 @@ export function Transfer() {
     }
 
     const primary=boxes.reduce((best,box)=>box.width*box.height>best.width*best.height?box:best,boxes[0]);
+    const videoBox=videoRef.current?.getBoundingClientRect();
+    const elementWidth=Math.max(1,videoBox?.width ?? frameWidth);
+    const elementHeight=Math.max(1,videoBox?.height ?? frameHeight);
+    const frameRatio=frameWidth/Math.max(1,frameHeight);
+    const elementRatio=elementWidth/elementHeight;
+    const contentWidth=frameRatio>elementRatio ? elementWidth : elementHeight*frameRatio;
+    const contentHeight=frameRatio>elementRatio ? elementWidth/frameRatio : elementHeight;
+    const offsetX=(elementWidth-contentWidth)/2;
+    const offsetY=(elementHeight-contentHeight)/2;
     setOpticalGuideRect({
-      left:Math.max(0,Math.min(100,(primary.x/Math.max(1,frameWidth))*100)),
-      top:Math.max(0,Math.min(100,(primary.y/Math.max(1,frameHeight))*100)),
-      width:Math.max(1,Math.min(100,(primary.width/Math.max(1,frameWidth))*100)),
-      height:Math.max(1,Math.min(100,(primary.height/Math.max(1,frameHeight))*100)),
+      left:Math.max(0,Math.min(100,(offsetX+(primary.x/frameWidth)*contentWidth)/elementWidth*100)),
+      top:Math.max(0,Math.min(100,(offsetY+(primary.y/frameHeight)*contentHeight)/elementHeight*100)),
+      width:Math.max(1,Math.min(100,(primary.width/frameWidth)*contentWidth/elementWidth*100)),
+      height:Math.max(1,Math.min(100,(primary.height/frameHeight)*contentHeight/elementHeight*100)),
     });
     const cx=(primary.x+primary.width/2)/Math.max(1,frameWidth);
     const cy=(primary.y+primary.height/2)/Math.max(1,frameHeight);
