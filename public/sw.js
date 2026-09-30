@@ -1,4 +1,4 @@
-const CACHE = 'opticode-studio-v5';
+const CACHE = 'opticode-studio-v6';
 const BASE = '/OptiCode-Studio/';
 const BUILD_MANIFEST = BASE + 'manifest.json';
 
@@ -8,6 +8,7 @@ const SHELL = [
   BASE + 'icon-192.svg',
   BASE + 'icon-512.svg',
   BASE + 'favicon.svg',
+  BASE + 'zxing_reader.wasm',
   BUILD_MANIFEST,
 ];
 
