@@ -862,6 +862,9 @@ export function Transfer() {
     guideDistanceRef.current='unknown';
     guideDetectionStreakRef.current=0;
     guideMissStreakRef.current=0;
+    guideDistanceRef.current='unknown';
+    guideDetectionStreakRef.current=0;
+    guideMissStreakRef.current=0;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideRect(null);
     setReceiving(false);
@@ -1232,6 +1235,7 @@ export function Transfer() {
         lastSeenAt:now,
         confidence:previous ? previous.confidence*.55+currentConfidence*.45 : currentConfidence,
         misses:0,
+        confirmed:false,
       };
       guideDetectionStreakRef.current=Math.min(8,guideDetectionStreakRef.current+1);
       guideMissStreakRef.current=0;
@@ -1769,7 +1773,7 @@ export function Transfer() {
     setOpticalGuideRect(null);
     opticalTrackRef.current=null;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
-    setOpticalGuideDiagnostics({framing:'searching',distance:'unknown',lighting:'unknown',stability:'moving'});
+    setOpticalGuideDiagnostics({framing:'searching',distance:'unknown',lighting:'unknown',stability:'moving',geometry:'searching',focus:'unknown'});
     setOpticalGuide({tone:'searching',title:'Looking for the sender screen…',detail:'Point your camera at the QR stream.',quality:0});
     setAckPayload('');
     receiverStartedRef.current=null;solvedRef.current=0;duplicateCountRef.current=0;
