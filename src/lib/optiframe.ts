@@ -650,22 +650,22 @@ export function inspectOptiFrameAcquisition(source: CanvasImageSource | ImageDat
   return { stage: 'ready', anchors: found, confidence, moduleScale, angle, geometryRatio, sampleWidth: image.width, sampleHeight: image.height, elapsedMs: performance.now() - started };
 }
 
-let lastPerspectiveAnchors: PerspectiveAnchorSet | null = null;
-
-export function decodeOptiFramePerspective(source: CanvasImageSource | ImageData): { frame: OptiFrame; diagnostics: OptiFramePerspectiveDiagnostics } | null {
+export function decodeOptiFramePerspective(
+  source: CanvasImageSource | ImageData,
+  previousAnchors: PerspectiveAnchorSet | null = null,
+): { frame: OptiFrame; diagnostics: OptiFramePerspectiveDiagnostics } | null {
   const started = performance.now();
   const image = toImageData(source);
   if (!image) return null;
 
-  if (lastPerspectiveAnchors) {
-    const tracked = lastPerspectiveAnchors.map((anchor) =>
-      searchFinderNear(image, anchor),
-    );
+  // Fast tracking path: search each known finder in a tiny neighborhood first.
+  // The caller owns the state, so workers no longer cross-contaminate lanes.
+  if (previousAnchors) {
+    const tracked = previousAnchors.map((anchor) => searchFinderNear(image, anchor));
     if (tracked.every(Boolean)) {
       const anchors: PerspectiveAnchorSet = [tracked[0]!, tracked[1]!, tracked[2]!, tracked[3]!];
       const frame = decodePerspectiveFromAnchors(image, anchors);
       if (frame) {
-        lastPerspectiveAnchors = anchors;
         return {
           frame,
           diagnostics: {
@@ -680,23 +680,17 @@ export function decodeOptiFramePerspective(source: CanvasImageSource | ImageData
     }
   }
 
+  // Full acquisition fallback is required for first lock and after tracker loss.
   const tl = searchFinder(image, 'tl');
   const tr = searchFinder(image, 'tr');
   const bl = searchFinder(image, 'bl');
   const br = searchFinder(image, 'br');
-  if (!tl || !tr || !bl || !br) {
-    lastPerspectiveAnchors = null;
-    return null;
-  }
+  if (!tl || !tr || !bl || !br) return null;
 
   const anchors: PerspectiveAnchorSet = [tl, tr, bl, br];
   const frame = decodePerspectiveFromAnchors(image, anchors);
-  if (!frame) {
-    lastPerspectiveAnchors = null;
-    return null;
-  }
+  if (!frame) return null;
 
-  lastPerspectiveAnchors = anchors;
   return {
     frame,
     diagnostics: {
