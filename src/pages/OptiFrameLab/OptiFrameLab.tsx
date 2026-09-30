@@ -1357,7 +1357,7 @@ export function OptiFrameLab() {
                  className="optiframe-surface block h-auto w-full max-w-[1080px]"
                  style={{ aspectRatio: `${laneLayout.columns} / ${laneLayout.rows}` }}
               />
-             ) : <div className="w-full max-w-[1080px]" style={{ aspectRatio: `${laneLayout.columns} / ${laneLayout.rows}` }} />
+             ) : <div className="w-full max-w-[1080px]" style={{ aspectRatio: `${laneLayout.columns} / ${laneLayout.rows}` }} /> }
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <GlassButton onClick={() => setStreamPlaying(value => !value)}>{streamPlaying ? <Pause size={14}/> : <Play size={14}/>} {streamPlaying ? 'Pause' : 'Start sharing'}</GlassButton>
