@@ -111,7 +111,7 @@ export function getOptiFrameCapacity() {
   return Math.min(OPTIFRAME_MAX_PAYLOAD, Math.floor(capacityBits() / 8) - 4);
 }
 
-export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
+export function rasterizeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   const capacity = getOptiFrameCapacity();
   if (payload.length > capacity) throw new Error('OptiFrame payload is too large.');
   if (!Number.isInteger(sequence) || sequence < 0 || sequence > 65535 || !Number.isInteger(total) || total < 1 || total > 65535) {
@@ -119,8 +119,8 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   }
 
   // Header v2 is 72 bits: magic16 + version4 + sequence16 + total16 +
-  // payloadLength16 + reserved4. The extra length bits unlock the larger
-  // 180×180 / 2-bit optical payload without sacrificing CRC protection.
+  // payloadLength16 + reserved4. This pure raster path is shared by the main
+  // thread encoder and the optional high-speed surface worker.
   const header = new Uint8Array(9);
   header[0] = MAGIC >>> 8;
   header[1] = MAGIC & 255;
@@ -140,14 +140,9 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   body[payload.length + 2] = crc >>> 8;
   body[payload.length + 3] = crc;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = OPTIFRAME_SIZE;
-  canvas.height = OPTIFRAME_SIZE;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas unavailable.');
+  const pixels = new Uint8ClampedArray(OPTIFRAME_SIZE * OPTIFRAME_SIZE * 4);
+  pixels.fill(255);
 
-  const image = ctx.createImageData(OPTIFRAME_SIZE, OPTIFRAME_SIZE);
-  image.data.fill(255);
   for (const coord of FINDER_CELL_COORDS) {
     const r = coord >>> 8;
     const col = coord & 255;
@@ -155,9 +150,10 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
     const origin = zoneOrigin(r, col)!;
     const level = finderBit(r - origin[0], col - origin[1]) ? 3 : 0;
     const lum = LUMINANCE_LEVELS[level];
-    image.data[i] = lum;
-    image.data[i + 1] = lum;
-    image.data[i + 2] = lum;
+    pixels[i] = lum;
+    pixels[i + 1] = lum;
+    pixels[i + 2] = lum;
+    pixels[i + 3] = 255;
   }
 
   let cursorBits = 0;
@@ -177,12 +173,24 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
       level = (bodyByte >>> shift) & 3;
     }
     const lum = LUMINANCE_LEVELS[level as 0 | 1 | 2 | 3];
-    image.data[i] = lum;
-    image.data[i + 1] = lum;
-    image.data[i + 2] = lum;
-    image.data[i + 3] = 255;
+    pixels[i] = lum;
+    pixels[i + 1] = lum;
+    pixels[i + 2] = lum;
+    pixels[i + 3] = 255;
     cursorBits += 2;
   }
+
+  return { width: OPTIFRAME_SIZE, height: OPTIFRAME_SIZE, pixels };
+}
+
+export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
+  const raster = rasterizeOptiFrame(payload, sequence, total);
+  const canvas = document.createElement('canvas');
+  canvas.width = raster.width;
+  canvas.height = raster.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas unavailable.');
+  const image = new ImageData(raster.pixels, raster.width, raster.height);
   ctx.putImageData(image, 0, 0);
   return { canvas, frame: { version: HEADER_VERSION, sequence, total, payload } as OptiFrame };
 }
