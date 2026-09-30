@@ -314,6 +314,7 @@ export function Transfer() {
   const opticalVisualQuadCurrentRef=useRef<Array<{x:number;y:number}>|null>(null);
   const opticalVisualQuadVelocityRef=useRef<Array<{x:number;y:number}>>([]);
   const opticalGroupBoxRef=useRef<{x:number;y:number;width:number;height:number}|null>(null);
+  const opticalGroupVelocityRef=useRef({x:0,y:0,width:0,height:0});
   const opticalGroupLastSeenRef=useRef(0);
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
@@ -1527,10 +1528,40 @@ export function Transfer() {
           right:Math.max(acc.right,box.x+box.width),
           bottom:Math.max(acc.bottom,box.y+box.height),
         }),{x:primary.x,y:primary.y,right:primary.x+primary.width,bottom:primary.y+primary.height});
-        opticalGroupBoxRef.current={x:group.x,y:group.y,width:Math.max(1,group.right-group.x),height:Math.max(1,group.bottom-group.y)};
+        const measuredGroup={
+          x:group.x,
+          y:group.y,
+          width:Math.max(1,group.right-group.x),
+          height:Math.max(1,group.bottom-group.y),
+        };
+        const previousGroup=opticalGroupBoxRef.current;
+        if(previousGroup){
+          const groupDt=Math.max(.016,Math.min(.30,(now-opticalGroupLastSeenRef.current)/1000));
+          const groupAlpha=.72;
+          const gv=opticalGroupVelocityRef.current;
+          const nextGroup={
+            x:previousGroup.x+(measuredGroup.x-previousGroup.x)*groupAlpha,
+            y:previousGroup.y+(measuredGroup.y-previousGroup.y)*groupAlpha,
+            width:previousGroup.width+(measuredGroup.width-previousGroup.width)*groupAlpha,
+            height:previousGroup.height+(measuredGroup.height-previousGroup.height)*groupAlpha,
+          };
+          const vx=(measuredGroup.x-previousGroup.x)/groupDt;
+          const vy=(measuredGroup.y-previousGroup.y)/groupDt;
+          const vw=(measuredGroup.width-previousGroup.width)/groupDt;
+          const vh=(measuredGroup.height-previousGroup.height)/groupDt;
+          gv.x=gv.x*.70+vx*.30;
+          gv.y=gv.y*.70+vy*.30;
+          gv.width=gv.width*.70+vw*.30;
+          gv.height=gv.height*.70+vh*.30;
+          opticalGroupBoxRef.current=nextGroup;
+        }else{
+          opticalGroupBoxRef.current=measuredGroup;
+          opticalGroupVelocityRef.current={x:0,y:0,width:0,height:0};
+        }
         opticalGroupLastSeenRef.current=now;
       }else if(opticalGroupBoxRef.current && now-opticalGroupLastSeenRef.current>1400){
         opticalGroupBoxRef.current=null;
+        opticalGroupVelocityRef.current={x:0,y:0,width:0,height:0};
       }
       const confirmed=guideDetectionStreakRef.current>=3;
       opticalTrackRef.current={...next,confirmed};
@@ -1680,6 +1711,7 @@ export function Transfer() {
     guideMissStreakRef.current=Math.min(8,guideMissStreakRef.current);
     opticalTrackRef.current=null;
     opticalGroupBoxRef.current=null;
+    opticalGroupVelocityRef.current={x:0,y:0,width:0,height:0};
     opticalGroupLastSeenRef.current=0;
     opticalVisualTargetRef.current=null;
     opticalVisualCurrentRef.current=null;
@@ -1963,10 +1995,18 @@ export function Transfer() {
         if(useTrackedRoi){
           const base=retainedGroup ?? track!.box;
           const predictMs=Math.min(100,Math.max(0,trackAge));
-          const predictedX=base.x+(retainedGroup ? 0 : track!.vx*predictMs);
-          const predictedY=base.y+(retainedGroup ? 0 : track!.vy*predictMs);
-          const predictedW=Math.max(12,base.width+(retainedGroup ? 0 : track!.vw*predictMs));
-          const predictedH=Math.max(12,base.height+(retainedGroup ? 0 : track!.vh*predictMs));
+          const predictedX=retainedGroup
+            ? base.x+opticalGroupVelocityRef.current.x*predictMs/1000
+            : base.x+track!.vx*predictMs;
+          const predictedY=retainedGroup
+            ? base.y+opticalGroupVelocityRef.current.y*predictMs/1000
+            : base.y+track!.vy*predictMs;
+          const predictedW=Math.max(12,retainedGroup
+            ? base.width+opticalGroupVelocityRef.current.width*predictMs/1000
+            : base.width+track!.vw*predictMs);
+          const predictedH=Math.max(12,retainedGroup
+            ? base.height+opticalGroupVelocityRef.current.height*predictMs/1000
+            : base.height+track!.vh*predictMs);
           // Motion padding grows with estimated camera velocity so a fast pan does
           // not outrun the ROI. The minimum border also protects perspective corners.
           const motionPadX=Math.max(28,Math.abs(track!.vx)*90);
