@@ -107,6 +107,21 @@ function getDisplayLaneCount() {
 }
 
 export function Transfer() {
+  const getRenderPrefetchWindow = () => {
+    const workers = qrEncoderRef.current?.capacity ?? 0;
+    const cores = typeof navigator === 'undefined' ? 4 : navigator.hardwareConcurrency || 4;
+    const memory = typeof navigator === 'undefined'
+      ? 4
+      : (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+
+    // Six groups is the reliability baseline. High-end devices get a deeper
+    // render pipeline so encoding stays ahead of the optical display without
+    // turning the cache into an unbounded memory sink.
+    if (cores <= 2 || memory < 2 || workers <= 1) return 6;
+    if (workers === 2 || cores <= 4 || memory < 4) return 9;
+    return 12;
+  };
+
   const [tab,setTab]=useState<'send'|'receive'>('send');
   const [mode,setMode]=useState<'fountain'|'compatibility'>('fountain');
   const [transferDensity,setTransferDensity]=useState<'legacy'|'dense'>('dense');
@@ -585,7 +600,8 @@ export function Transfer() {
     const entry={matrices,renderMs,encodeMs:encodeStats?.encodeMs ?? 0};
     renderCacheRef.current.delete(key);
     renderCacheRef.current.set(key,entry);
-    while(renderCacheRef.current.size>6){
+    const cacheLimit=Math.max(8,getRenderPrefetchWindow()+2);
+    while(renderCacheRef.current.size>cacheLimit){
       const oldest=renderCacheRef.current.keys().next().value as string|undefined;
       if(!oldest)break;
       renderCacheRef.current.delete(oldest);
@@ -607,7 +623,8 @@ export function Transfer() {
     playbackPrefetchRef.current.clear();
     playbackFountainRef.current=fountainMode;
     const startGroup=playbackGroupRef.current;
-    const groupIndices=[startGroup,startGroup+1,startGroup+2,startGroup+3,startGroup+4,startGroup+5];
+    const prefetchWindow=getRenderPrefetchWindow();
+    const groupIndices=Array.from({length:prefetchWindow},(_,offset)=>startGroup+offset);
 
     const loadGroup=async(index:number,display=false)=>{
       try{
@@ -657,7 +674,7 @@ export function Transfer() {
             ...prev,
             renderMs:prev.renderMs===0?entry.renderMs:prev.renderMs*.75+entry.renderMs*.25,
             encodeMs:prev.encodeMs===0?entry.encodeMs:prev.encodeMs*.75+entry.encodeMs*.25,
-            prefetchReady:Math.min(ready,6),
+            prefetchReady:Math.min(ready,prefetchWindow),
             encoderWorkers:qrEncoderRef.current?.capacity ?? 0,
             renderCount:renderCountRef.current,
             renderFps:prev.renderFps===0
@@ -2348,7 +2365,7 @@ export function Transfer() {
           </div>
         </div>}
         {(fountain||compat)&&<div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Automatic speed<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On</option><option value="off">Off</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Sharing speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="16">60 FPS</option><option value="24">50 FPS</option><option value="35">Very fast</option><option value="45">Fast</option><option value="60">Balanced</option><option value="90">Reliable</option><option value="150">Extra reliable</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Behind the scenes</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/6 groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Screen update</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>File per screen</b><p className="mt-1 text-[var(--text-muted)]">{fountain ? FOUNTAIN_BLOCK_BYTES + ' bytes/block' : (compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME) + ' raw bytes/frame · 1× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Codes on screen</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · The app chooses the screen layout automatically.</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Missed parts</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Extra recovery':'Simple sharing'}</p></div></div>}
+          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Automatic speed<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On</option><option value="off">Off</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Sharing speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="16">60 FPS</option><option value="24">50 FPS</option><option value="35">Very fast</option><option value="45">Fast</option><option value="60">Balanced</option><option value="90">Reliable</option><option value="150">Extra reliable</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Behind the scenes</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/{getRenderPrefetchWindow()} groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Screen update</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>File per screen</b><p className="mt-1 text-[var(--text-muted)]">{fountain ? FOUNTAIN_BLOCK_BYTES + ' bytes/block' : (compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME) + ' raw bytes/frame · 1× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Codes on screen</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · The app chooses the screen layout automatically.</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Missed parts</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Extra recovery':'Simple sharing'}</p></div></div>}
         </>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
