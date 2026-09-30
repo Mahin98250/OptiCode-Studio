@@ -1,6 +1,6 @@
 import { encodeOptiFrame, OPTIFRAME_SIZE, type OptiFrame } from './optiframe';
 
-export type OptiLaneCount = 1 | 2 | 4 | 6;
+export type OptiLaneCount = 1 | 2 | 4 | 6 | 9 | 12 | 16;
 
 export type OptiLaneLayout = {
   columns: number;
@@ -8,9 +8,13 @@ export type OptiLaneLayout = {
 };
 
 export function getOptiLaneLayout(count: OptiLaneCount): OptiLaneLayout {
+  if (count === 16) return { columns: 4, rows: 4 };
+  if (count === 12) return { columns: 4, rows: 3 };
+  if (count === 9) return { columns: 3, rows: 3 };
   if (count === 6) return { columns: 3, rows: 2 };
   if (count === 4) return { columns: 2, rows: 2 };
-  return { columns: count, rows: 1 };
+  if (count === 2) return { columns: 2, rows: 1 };
+  return { columns: 1, rows: 1 };
 }
 
 export function getOptiLaneSequence(baseSequence: number, lane: number, total: number): number {
@@ -80,9 +84,10 @@ export function createOptiLaneSurface(
   }
 
   const layout = getOptiLaneLayout(laneCount);
-  // Physical profiles: 1×=4 px/module, 2×/4×=3 px/module, 6×=2 px/module.
-  // The extreme 6-lane profile produces a native 1080×720 3×2 optical surface.
-  const renderScale = laneCount === 1 ? 4 : laneCount === 6 ? 2 : 3;
+  // Physical profiles: 1×=4 px/module, 2×/4×=3 px/module, and
+  // 6×/9×/12×/16×=2 px/module. High-lane modes trade per-lane module
+  // scale for parallel optical bandwidth and are intended for large screens.
+  const renderScale = laneCount === 1 ? 4 : laneCount === 2 || laneCount === 4 ? 3 : 2;
   const laneRenderSize = OPTIFRAME_SIZE * renderScale;
   const canvas = document.createElement('canvas');
   canvas.width = layout.columns * laneRenderSize;
