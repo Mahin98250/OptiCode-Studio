@@ -1,10 +1,7 @@
 import jsQR from 'jsqr';
 import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
 
-const localWasmUrl = new URL(
-  `${import.meta.env.BASE_URL}zxing_reader.wasm`,
-  self.location.origin,
-).toString();
+const localWasmUrl = new URL('../zxing_reader.wasm', import.meta.url).toString();
 
 const zxingWarmup=prepareZXingModule({
   overrides:{
