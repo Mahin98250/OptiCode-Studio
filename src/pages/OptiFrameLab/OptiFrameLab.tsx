@@ -8,7 +8,7 @@ import { OptiFrameDecodePool } from '../../lib/optiframeDecodePool';
 import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
 import { createOptiFrameCanvasCache, createOptiLaneSurface, cropOptiLaneGrid, getOptiLaneLayout, type OptiLaneCount } from '../../lib/optiframeLanes';
 import { decodeOptiCodeFileTransfer, type OptiCodeFileTransfer } from '../../lib/opticodeTransfer';
-import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_OVERHEAD, parseOpticalFountainFrame, type OpticalFountainPlan } from '../../lib/opticalFountain';
+import { createOpticalFountainTransfer, OpticalFountainDecoder, parseOpticalFountainFrame, type OpticalFountainPlan } from '../../lib/opticalFountain';
 
 type CameraStats = {
   attempts: number;
