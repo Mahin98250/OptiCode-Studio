@@ -57,6 +57,7 @@ type NativeQrDetector = {
     rawValue?:string;
     format?:string;
     boundingBox?:{x:number;y:number;width:number;height:number};
+    cornerPoints?:Array<{x:number;y:number}>;
   }>>;
 };
 
@@ -960,12 +961,13 @@ export function Transfer() {
         try{
           const found=await nativeDetectorRef.current.detect(video);
           const values=found.map(item=>item.rawValue).filter((value):value is string=>Boolean(value));
-          const nativeBoxes=found
-            .map(item=>item.boundingBox ? {
+          const nativeBoxes=found.flatMap(item=>{
+            if(!item.boundingBox)return [];
+            return [{
               ...item.boundingBox,
               corners:item.cornerPoints?.filter(point=>Number.isFinite(point.x)&&Number.isFinite(point.y)),
-            } : null)
-            .filter((box):box is OpticalGuideBox=>Boolean(box));
+            } satisfies OpticalGuideBox];
+          });
 
           // BarcodeDetector can publish geometry before the deterministic
           // worker finishes decoding the payload. Use that geometry only when
