@@ -104,7 +104,7 @@ export function OptiFrameLab() {
   const [streamPlaying, setStreamPlaying] = useState(false);
   const [streamIndex, setStreamIndex] = useState(0);
   const [laneCount, setLaneCount] = useState<OptiLaneCount>(1);
-  const [streamIntervalMs, setStreamIntervalMs] = useState(300);
+  const [streamIntervalMs, setStreamIntervalMs] = useState(16);
   const [transferFile, setTransferFile] = useState<File | null>(null);
   const [transferData, setTransferData] = useState<Uint8Array | null>(null);
   const [opticalFountainPlan, setOpticalFountainPlan] = useState<OpticalFountainPlan | null>(null);
@@ -339,6 +339,7 @@ export function OptiFrameLab() {
       setTransferData(null);
       setOpticalFountainPlan(plan);
       setStreamIndex(0);
+      setStreamIntervalMs(16);
       setStreamPlaying(false);
       setStatus(
         file.name +
@@ -906,7 +907,7 @@ export function OptiFrameLab() {
         if (!streamRef.current) return;
         const maxInFlight = laneCount === 1
           ? Math.min(3, Math.max(1, decodePoolRef.current.capacity))
-          : 2;
+          : Math.min(2, Math.max(1, decodePoolRef.current.capacity));
         if (opticalDecodeInFlightRef.current < maxInFlight) {
           opticalDecodeInFlightRef.current += 1;
           void decodeCameraFrame().finally(() => {
