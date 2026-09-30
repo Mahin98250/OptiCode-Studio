@@ -150,6 +150,7 @@ export function Transfer() {
   const wakeLockRef=useRef<WakeLockSentinel|null>(null);
   const fallbackLoopRef=useRef<number|null>(null);
   const fallbackActiveRef=useRef(false);
+  const fallbackUsesRvfcRef=useRef(false);
   const nativeLoopRef=useRef<number|null>(null);
   const nativeActiveRef=useRef(false);
   const nativeInFlightRef=useRef(false);
@@ -808,9 +809,16 @@ export function Transfer() {
     if(benchmarkTimerRef.current!==null){window.clearTimeout(benchmarkTimerRef.current);benchmarkTimerRef.current=null;}
     benchmarkStartedRef.current=null;
     setBenchmarking(false);
-    if(fallbackLoopRef.current!==null){window.clearTimeout(fallbackLoopRef.current);fallbackLoopRef.current=null;}
+    if(fallbackLoopRef.current!==null){
+      const video=videoRef.current as (HTMLVideoElement & {cancelVideoFrameCallback?:(handle:number)=>void}) | null;
+      if(fallbackUsesRvfcRef.current) video?.cancelVideoFrameCallback?.(fallbackLoopRef.current);
+      window.clearTimeout(fallbackLoopRef.current);
+      fallbackLoopRef.current=null;
+    }
+    fallbackUsesRvfcRef.current=false;
     if(nativeLoopRef.current!==null){window.clearTimeout(nativeLoopRef.current);nativeLoopRef.current=null;}
     fallbackActiveRef.current=false;
+    fallbackUsesRvfcRef.current=false;
     nativeActiveRef.current=false;
     nativeInFlightRef.current=false;
     nativeDetectorRef.current=null;
@@ -1418,9 +1426,18 @@ export function Transfer() {
       }
 
       if(receivingRef.current && fallbackActiveRef.current){
-        // 30–60 ms capture cadence gives the camera
-        // several acquisition opportunities during each displayed QR interval.
-        fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(16,Math.min(50,scanDelayRef.current)));
+        const liveVideo=videoRef.current as (HTMLVideoElement & {
+          requestVideoFrameCallback?:(callback:(now:number,metadata:VideoFrameCallbackMetadata)=>void)=>number;
+        }) | null;
+        if(liveVideo?.requestVideoFrameCallback){
+          // Decode exactly once per camera-presented frame. This removes timer
+          // drift and duplicate processing when the camera is delivering 30/60 FPS.
+          fallbackUsesRvfcRef.current=true;
+          fallbackLoopRef.current=liveVideo.requestVideoFrameCallback(()=>void loop());
+        }else{
+          fallbackUsesRvfcRef.current=false;
+          fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(16,Math.min(50,scanDelayRef.current)));
+        }
       }
     };
     void loop();
