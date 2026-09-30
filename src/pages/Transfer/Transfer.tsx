@@ -279,6 +279,11 @@ export function Transfer() {
   // capture sequence or an older frame can visibly pull the lock backwards.
   const opticalDecodeSequenceRef=useRef(0);
   const opticalLatestGeometrySequenceRef=useRef(0);
+  // Adaptive decode concurrency prevents a slow phone from filling every
+  // worker with stale frames, while high-end devices can ramp up to the full
+  // worker pool once actual decode latency proves they can sustain it.
+  const decodeParallelismRef=useRef(1);
+  const decodePerfWindowRef=useRef({samples:0,totalMs:0});
   const feedbackVideoRef=useRef<HTMLVideoElement>(null);
   const feedbackStreamRef=useRef<MediaStream|null>(null);
   const feedbackReaderRef=useRef<ZxingReader|null>(null);
@@ -1801,9 +1806,12 @@ export function Transfer() {
         // module resolution. A periodic full-frame probe keeps reacquisition safe.
         const misses=noDetectionDecodeCountRef.current;
 
-        // Never spend canvas time preparing a frame while every worker is busy.
-        // With requestVideoFrameCallback this is a common case on slower phones.
-        if(qrPoolRef.current.available<0){
+        // Never spend canvas time preparing a frame while the adaptive
+        // in-flight budget is saturated. This is deliberately stricter than
+        // pool.available: stale optical frames are not useful enough to justify
+        // burning CPU on a constrained phone.
+        const concurrencyBudget=Math.max(1,Math.min(qrPoolRef.current.capacity,decodeParallelismRef.current));
+        if(qrPoolRef.current.available<0 || qrPoolRef.current.busyCount>=concurrencyBudget){
           fallbackLoopRef.current=window.setTimeout(()=>void loop(),Math.max(16,Math.min(36,scanDelayRef.current)));
           return;
         }
@@ -1943,8 +1951,9 @@ export function Transfer() {
               detectedWindowRef.current={started:now,count:0};
             }
 
-            // Adapt the capture cadence to actual decoder cost, but never let
-            // the optical receiver collapse into a single slow serial loop.
+            // Adapt both capture pacing and decoder parallelism to measured
+            // latency. Slow devices stay at one in-flight decode; fast devices
+            // earn additional lanes only after several healthy samples.
             scanDelayRef.current=decoded.processingMs>150
               ?Math.min(70,Math.max(40,Math.round(decoded.processingMs*.28)))
               :decoded.processingMs>75
@@ -1952,6 +1961,23 @@ export function Transfer() {
                 :decoded.values.length>0
                   ?Math.max(16,scanDelayRef.current-4)
                   :Math.min(50,scanDelayRef.current+2);
+
+            const perf=decodePerfWindowRef.current;
+            perf.samples+=1;
+            perf.totalMs+=decoded.processingMs;
+            if(perf.samples>=6){
+              const avgMs=perf.totalMs/perf.samples;
+              const capacity=qrPoolRef.current?.healthyCount ?? 1;
+              if(avgMs<42 && decoded.processingMs<55){
+                decodeParallelismRef.current=Math.min(capacity,decodeParallelismRef.current+1);
+              }else if(avgMs>125 || decoded.processingMs>180){
+                decodeParallelismRef.current=Math.max(1,decodeParallelismRef.current-1);
+              }else if(avgMs>82){
+                decodeParallelismRef.current=Math.max(1,decodeParallelismRef.current-1);
+              }
+              perf.samples=0;
+              perf.totalMs=0;
+            }
           }).catch(e=>{
             if(receivingRef.current)setError(e instanceof Error?e.message:'QR decoder worker failed.');
           });
@@ -2003,6 +2029,8 @@ export function Transfer() {
     noDetectionDecodeCountRef.current=0;
     opticalDecodeSequenceRef.current=0;
     opticalLatestGeometrySequenceRef.current=0;
+    decodeParallelismRef.current=1;
+    decodePerfWindowRef.current={samples:0,totalMs:0};
     nativeCallsRef.current=0;
     nativeInFlightRef.current=false;
     zxingCallsRef.current=0;
