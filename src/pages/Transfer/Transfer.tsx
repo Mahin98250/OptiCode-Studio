@@ -213,6 +213,7 @@ export function Transfer() {
       opticalVisualTargetRef.current=null;
       opticalVisualCurrentRef.current=null;
       opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
+      setOpticalGuideRect(null);
       return;
     }
 
@@ -226,18 +227,28 @@ export function Transfer() {
         const velocity=opticalVisualVelocityRef.current;
         const dt=Math.min(.034,Math.max(.008,(time-last)/1000));
         last=time;
-        // Critically damped-ish spring. Position follows quickly, while
-        // velocity damping prevents jitter/overshoot when decoder boxes move.
-        const stiffness=190;
-        const damping=25;
+        // Exact critically-damped second-order integration. Unlike a CSS
+        // transition, this is frame-rate independent, never overshoots, and
+        // keeps the overlay glued to the latest detector target while the
+        // decoder itself may only refresh at 10–30 Hz.
+        const omega=30;
         (['left','top','width','height'] as const).forEach(key=>{
-          const displacement=target[key]-base[key];
-          velocity[key]+=displacement*stiffness*dt;
-          velocity[key]*=Math.exp(-damping*dt);
-          next[key]=base[key]+velocity[key]*dt;
+          const displacement=base[key]-target[key];
+          const v=velocity[key];
+          const e=Math.exp(-omega*dt);
+          next[key]=target[key]+(displacement+(v+omega*displacement)*dt)*e;
+          velocity[key]=(v-omega*(v+omega*displacement)*dt)*e;
         });
         opticalVisualCurrentRef.current=next;
-        setOpticalGuideRect(next);
+        const overlay=opticalGuideOverlayRef.current;
+        if(overlay){
+          overlay.style.left=next.left+'%';
+          overlay.style.top=next.top+'%';
+          overlay.style.width=next.width+'%';
+          overlay.style.height=next.height+'%';
+        }else{
+          setOpticalGuideRect(next);
+        }
       }
       opticalVisualRafRef.current=requestAnimationFrame(tick);
     };
@@ -259,6 +270,9 @@ export function Transfer() {
   const opticalVisualCurrentRef=useRef<OpticalGuideRect|null>(null);
   const opticalVisualVelocityRef=useRef({left:0,top:0,width:0,height:0});
   const opticalVisualRafRef=useRef<number|null>(null);
+  const opticalGuideOverlayRef=useRef<HTMLDivElement|null>(null);
+  const opticalGroupBoxRef=useRef<{x:number;y:number;width:number;height:number}|null>(null);
+  const opticalGroupLastSeenRef=useRef(0);
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
   const feedbackVideoRef=useRef<HTMLVideoElement>(null);
@@ -1218,34 +1232,75 @@ export function Transfer() {
     };
 
     const current=opticalTrackRef.current;
-    const primary=detected && boxes.length>0
-      ? boxes.reduce((best,box)=>box.width*box.height>best.width*best.height?box:best,boxes[0])
-      : null;
 
-    if(primary){
+    const boxIoU=(a:{x:number;y:number;width:number;height:number},b:{x:number;y:number;width:number;height:number})=>{
+      const ax2=a.x+a.width, ay2=a.y+a.height;
+      const bx2=b.x+b.width, by2=b.y+b.height;
+      const ix=Math.max(0,Math.min(ax2,bx2)-Math.max(a.x,b.x));
+      const iy=Math.max(0,Math.min(ay2,by2)-Math.max(a.y,b.y));
+      const intersection=ix*iy;
+      if(intersection<=0)return 0;
+      return intersection/Math.max(1,a.width*a.height+b.width*b.height-intersection);
+    };
+    const association=(candidate:{x:number;y:number;width:number;height:number},reference:{x:number;y:number;width:number;height:number})=>{
+      const candidateCx=candidate.x+candidate.width/2;
+      const candidateCy=candidate.y+candidate.height/2;
+      const referenceCx=reference.x+reference.width/2;
+      const referenceCy=reference.y+reference.height/2;
+      const diagonal=Math.max(8,Math.hypot(reference.width,reference.height));
+      const centerDistance=Math.hypot(candidateCx-referenceCx,candidateCy-referenceCy)/diagonal;
+      const centerScore=Math.exp(-Math.pow(centerDistance/.78,2));
+      const widthRatio=Math.min(candidate.width/Math.max(1,reference.width),reference.width/Math.max(1,candidate.width));
+      const heightRatio=Math.min(candidate.height/Math.max(1,reference.height),reference.height/Math.max(1,candidate.height));
+      const sizeScore=Math.sqrt(Math.max(0,widthRatio*heightRatio));
+      return .56*boxIoU(candidate,reference)+.29*centerScore+.15*sizeScore;
+    };
+
+    if(detected && boxes.length>0){
       const previous=current;
       const dt=Math.max(16,Math.min(300,now-(previous?.lastSeenAt ?? now)));
       const predicted=previous ? {
         x:previous.box.x+previous.vx*dt,
         y:previous.box.y+previous.vy*dt,
-        width:previous.box.width+previous.vw*dt,
-        height:previous.box.height+previous.vh*dt,
-      } : primary;
-      // High-gain measurement update: the visual spring handles the final
-      // interpolation, so the logical tracker should not introduce another
-      // large lag layer.
-      const alpha=previous ? .82 : 1;
+        width:Math.max(4,previous.box.width+previous.vw*dt),
+        height:Math.max(4,previous.box.height+previous.vh*dt),
+      } : boxes.reduce((best,box)=>box.width*box.height>best.width*best.height?box:best,boxes[0]);
+      // Associate the new detections to the predicted target. This prevents
+      // the old "largest QR wins" rule from jumping the lock to another lane
+      // when several QRs are visible simultaneously.
+      const ranked=boxes.map(box=>({box,score:previous?association(box,predicted):0}))
+        .sort((a,b)=>previous ? b.score-a.score : (b.box.width*b.box.height)-(a.box.width*a.box.height));
+      const selected=ranked[0].box;
+      const associationScore=previous?ranked[0].score:1;
+      const primary=selected;
+      const predictedForFilter=previous ? predicted : primary;
+      // Adaptive alpha-beta filtering: alpha responds to movement and
+      // confidence, while beta updates the velocity estimate from the same
+      // residual. This follows fast camera pans without the "rubber band" lag
+      // of a fixed exponential smoother.
+      const residualX=primary.x-predictedForFilter.x;
+      const residualY=primary.y-predictedForFilter.y;
+      const residualW=primary.width-predictedForFilter.width;
+      const residualH=primary.height-predictedForFilter.height;
+      const referenceDiagonal=Math.max(16,Math.hypot(predictedForFilter.width,predictedForFilter.height));
+      const residualSpeed=Math.hypot(residualX,residualY)/Math.max(1,dt*referenceDiagonal);
+      const alpha=previous
+        ? Math.min(.95,Math.max(.70,.76+Math.min(.12,residualSpeed*4)))
+        : 1;
+      const beta=previous
+        ? Math.min(.36,Math.max(.14,.18+Math.min(.16,residualSpeed*5)))
+        : 0;
       const smoothed={
-        x:predicted.x+(primary.x-predicted.x)*alpha,
-        y:predicted.y+(primary.y-predicted.y)*alpha,
-        width:Math.max(4,predicted.width+(primary.width-predicted.width)*alpha),
-        height:Math.max(4,predicted.height+(primary.height-predicted.height)*alpha),
+        x:predictedForFilter.x+residualX*alpha,
+        y:predictedForFilter.y+residualY*alpha,
+        width:Math.max(4,predictedForFilter.width+residualW*alpha),
+        height:Math.max(4,predictedForFilter.height+residualH*alpha),
       };
       const invDt=1/dt;
-      const measuredVx=(primary.x-(previous?.box.x ?? primary.x))*invDt;
-      const measuredVy=(primary.y-(previous?.box.y ?? primary.y))*invDt;
-      const measuredVw=(primary.width-(previous?.box.width ?? primary.width))*invDt;
-      const measuredVh=(primary.height-(previous?.box.height ?? primary.height))*invDt;
+      const measuredVx=previous ? previous.vx+residualX*invDt*beta : 0;
+      const measuredVy=previous ? previous.vy+residualY*invDt*beta : 0;
+      const measuredVw=previous ? previous.vw+residualW*invDt*beta : 0;
+      const measuredVh=previous ? previous.vh+residualH*invDt*beta : 0;
       // For multi-lane sender layouts, coach against the whole detected group
       // rather than whichever QR happens to be the largest. This prevents a
       // valid 4-lane screen from being treated as a single centered QR.
@@ -1315,17 +1370,37 @@ export function Transfer() {
 
       const next:OpticalTrack={
         box:smoothed,
-        vx:(previous?.vx ?? measuredVx)*.72+measuredVx*.28,
-        vy:(previous?.vy ?? measuredVy)*.72+measuredVy*.28,
-        vw:(previous?.vw ?? measuredVw)*.72+measuredVw*.28,
-        vh:(previous?.vh ?? measuredVh)*.72+measuredVh*.28,
+        vx:measuredVx,
+        vy:measuredVy,
+        vw:measuredVw,
+        vh:measuredVh,
         lastSeenAt:now,
-        confidence:previous ? previous.confidence*.55+currentConfidence*.45 : currentConfidence,
+        confidence:previous ? previous.confidence*.45+currentConfidence*.55 : currentConfidence,
         misses:0,
         confirmed:false,
       };
-      guideDetectionStreakRef.current=Math.min(8,guideDetectionStreakRef.current+1);
+      // A very low association score means the camera may have landed on a
+      // different QR. It is still a real detection, so allow reacquisition,
+      // but never let a far-away lane contaminate a strong locked prediction.
+      const associationStrong=!previous || associationScore>=.24 || guideDetectionStreakRef.current<3;
+      if(!associationStrong) guideStableCountRef.current=0;
+      guideDetectionStreakRef.current=associationStrong
+        ? Math.min(8,guideDetectionStreakRef.current+1)
+        : 1;
       guideMissStreakRef.current=0;
+      if(boxes.length>1){
+        const group=boxes.reduce((acc,box)=>({
+          x:Math.min(acc.x,box.x),
+          y:Math.min(acc.y,box.y),
+          right:Math.max(acc.right,box.x+box.width),
+          bottom:Math.max(acc.bottom,box.y+box.height),
+        }),{x:primary.x,y:primary.y,right:primary.x+primary.width,bottom:primary.y+primary.height});
+        opticalGroupBoxRef.current={x:group.x,y:group.y,width:Math.max(1,group.right-group.x),height:Math.max(1,group.bottom-group.y)};
+        opticalGroupLastSeenRef.current=now;
+      }else if(opticalGroupBoxRef.current && now-opticalGroupLastSeenRef.current>1400){
+        opticalGroupBoxRef.current=null;
+      }
+      const confirmed=guideDetectionStreakRef.current>=3;
       const confirmed=guideDetectionStreakRef.current>=3;
       opticalTrackRef.current={...next,confirmed};
       setOpticalTrack({confidence:next.confidence,predicted:false,ageMs:0});
@@ -1871,6 +1946,8 @@ export function Transfer() {
     opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
     setOpticalGuideRect(null);
     opticalTrackRef.current=null;
+    opticalGroupBoxRef.current=null;
+    opticalGroupLastSeenRef.current=0;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideDiagnostics({framing:'searching',distance:'unknown',lighting:'unknown',stability:'moving',geometry:'searching',focus:'unknown'});
     setOpticalGuide({tone:'searching',title:'Looking for the sender screen…',detail:'Point your camera at the QR stream.',quality:0});
@@ -2058,6 +2135,7 @@ export function Transfer() {
 
               {opticalGuideRect&&(
                 <div
+                  ref={opticalGuideOverlayRef}
                   className="absolute will-change-[left,top,width,height]"
                   style={{
                     left:opticalGuideRect.left+'%',
