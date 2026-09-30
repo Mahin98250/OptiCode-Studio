@@ -317,6 +317,45 @@ const QUICK_FINDER_POINTS = [
   [8, 0], [8, 4], [8, 8],
 ] as const;
 
+function finderCoarseScore(image: ImageData, cx: number, cy: number, moduleScale: number, angle = 0) {
+  const radians = angle * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const points = [
+    [0, 0, 1.4],
+    [0, 4, 1.1],
+    [0, 8, 1.1],
+    [4, 0, 1.1],
+    [4, 4, 1.5],
+    [4, 8, 1.1],
+    [8, 0, 1.1],
+    [8, 4, 1.1],
+    [8, 8, 1.4],
+  ] as const;
+  let min = 255;
+  let max = 0;
+  const samples: Array<{ value: number; expected: number; weight: number }> = [];
+  for (const [r, col, weight] of points) {
+    const dx = (col - 4) * moduleScale;
+    const dy = (r - 4) * moduleScale;
+    const x = cx + dx * cos - dy * sin;
+    const y = cy + dx * sin + dy * cos;
+    const value = bilinear(image, x, y);
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+    samples.push({ value, expected: finderBit(r, col) ? 1 : 0, weight });
+  }
+  if (max - min < 42) return -1;
+  let error = 0;
+  let totalWeight = 0;
+  for (const sample of samples) {
+    const normalized = (sample.value - min) / (max - min);
+    error += Math.abs(normalized - sample.expected) * sample.weight;
+    totalWeight += sample.weight;
+  }
+  return 1 - error / totalWeight;
+}
+
 function finderQuickScore(image: ImageData, cx: number, cy: number, moduleScale: number, angle = 0) {
   const radians = angle * Math.PI / 180;
   const cos = Math.cos(radians);
@@ -376,10 +415,8 @@ function searchFinder(image: ImageData, corner: Corner) {
   const scan = (angles: readonly number[]) => {
     const candidates: Array<{ x: number; y: number; score: number; scale: number; angle: number }> = [];
     const retain = (candidate: { x: number; y: number; score: number; scale: number; angle: number }) => {
-      // Keep only the six strongest candidates without sorting the whole list
-      // for every hit. Finder acquisition runs across thousands of positions,
-      // so this hot path should stay allocation- and sort-light.
-      if (candidates.length < 6) {
+      // Keep only the strongest candidates without sorting a large point cloud.
+      if (candidates.length < 8) {
         candidates.push(candidate);
         return;
       }
@@ -390,12 +427,17 @@ function searchFinder(image: ImageData, corner: Corner) {
       if (candidate.score > candidates[weakestIndex].score) candidates[weakestIndex] = candidate;
     };
 
+    // Global acquisition is intentionally coarse. Every survivor is then
+    // re-scored with the full finder template in the existing refinement pass.
+    const coarseScaleStep = Math.max(1.0, expectedScale * 0.16);
+    const coarseSpatialStep = Math.max(5, Math.min(12, Math.round(Math.max(2, expectedScale * 0.9))));
+
     for (const angle of angles) {
-      for (let scale = minScale; scale <= maxScale; scale += scaleStep) {
-        for (let y = yStart + 4; y < yEnd - 4; y += step) {
-          for (let x = xStart + 4; x < xEnd - 4; x += step) {
-            const score = finderQuickScore(image, x, y, scale, angle);
-            if (score > 0.48) retain({ x, y, score, scale, angle });
+      for (let scale = minScale; scale <= maxScale; scale += coarseScaleStep) {
+        for (let y = yStart + 4; y < yEnd - 4; y += coarseSpatialStep) {
+          for (let x = xStart + 4; x < xEnd - 4; x += coarseSpatialStep) {
+            const score = finderCoarseScore(image, x, y, scale, angle);
+            if (score > 0.42) retain({ x, y, score, scale, angle });
           }
         }
       }
