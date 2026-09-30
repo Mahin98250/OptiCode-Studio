@@ -24,18 +24,17 @@ const mobileLinks = [
   { to: '/transfer', label: 'Send', icon: Zap, tone: 'nav-tone-rose' },
 ];
 
-const springTransition = {
-  type: 'spring' as const,
-  stiffness: 560,
-  damping: 34,
-  mass: 0.62,
+const capsuleTransition = {
+  type: 'tween' as const,
+  duration: 0.48,
+  ease: [0.22, 1, 0.36, 1] as const,
 };
 
 const iconSpring = {
   type: 'spring' as const,
-  stiffness: 640,
-  damping: 30,
-  mass: 0.46,
+  stiffness: 250,
+  damping: 29,
+  mass: 0.9,
 };
 
 export function Navbar() {
@@ -72,7 +71,7 @@ export function Navbar() {
                       <motion.span
                         layoutId="desktop-nav-fluid-pill"
                         className="nav-fluid-pill absolute inset-0 rounded-full bg-[var(--nav-active)] ring-1 ring-[var(--nav-active-border)]"
-                        transition={springTransition}
+                        transition={capsuleTransition}
                       >
                         <span className="nav-fluid-pill-glow" />
                         <span className="nav-fluid-pill-specular" />
@@ -123,6 +122,14 @@ export function Navbar() {
       </header>
 
       <nav className="mobile-bottom-nav fixed inset-x-2 bottom-2 z-[60]" aria-label="Primary">
+        <svg className="nav-liquid-svg" aria-hidden="true" focusable="false">
+          <defs>
+            <filter id="nav-liquid-refraction" x="-20%" y="-30%" width="140%" height="160%">
+              <feTurbulence type="fractalNoise" baseFrequency="0.012 0.028" numOctaves="1" seed="17" result="navNoise" />
+              <feDisplacementMap in="SourceGraphic" in2="navNoise" scale="7" xChannelSelector="R" yChannelSelector="B" />
+            </filter>
+          </defs>
+        </svg>
         <div className="glass-panel nav-fluid-dock relative mx-auto flex max-w-md items-center justify-between rounded-[27px] p-1.5 shadow-2xl">
           {mobileLinks.map(({ to, label, icon: Icon, tone }) => {
             const active = location.pathname === to;
@@ -141,6 +148,7 @@ export function Navbar() {
                   >
                     <span className="nav-liquid-aura" />
                     <span className="nav-liquid-surface" />
+                    <span className="nav-liquid-specular" />
                     <span className="nav-liquid-edge" />
                   </motion.span>
                 )}
@@ -155,12 +163,13 @@ export function Navbar() {
                   <motion.span
                     className={`nav-liquid-orb relative grid shrink-0 place-items-center rounded-full ${active ? 'nav-liquid-orb-active' : ''}`}
                     animate={{
-                      width: active ? 39 : 34,
-                      height: active ? 39 : 34,
+                      width: active ? 44 : 34,
+                      height: active ? 44 : 34,
                     }}
                     transition={iconSpring}
                   >
-                    <span className={`nav-liquid-orb-ring absolute inset-0 rounded-full ${active ? 'opacity-100' : 'opacity-0'}`} />
+                    <span className={`nav-liquid-orb-ring absolute -inset-[3px] rounded-full ${active ? 'opacity-100' : 'opacity-0'}`} />
+                    <span className="nav-liquid-orb-glint absolute inset-[5px] rounded-full" />
                     <Icon size={active ? 17 : 18} strokeWidth={active ? 2.5 : 2} />
                   </motion.span>
 
@@ -168,9 +177,9 @@ export function Navbar() {
                     className={`nav-liquid-label overflow-hidden whitespace-nowrap ${active ? 'max-w-[72px]' : 'max-w-0'}`}
                     animate={{
                       opacity: active ? 1 : 0,
-                      x: active ? 0 : -5,
+                      x: active ? 0 : -8,
                     }}
-                    transition={iconSpring}
+                    transition={{ ...iconSpring, delay: active ? 0.06 : 0 }}
                   >
                     {label}
                   </motion.span>
