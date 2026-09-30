@@ -667,7 +667,6 @@ function decodePerspectiveFromAnchors(image: ImageData, anchors: PerspectiveAnch
       packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
       cursorBits += 2;
     }
-  }
   return decodePackedFrame(packed);
 }
 
