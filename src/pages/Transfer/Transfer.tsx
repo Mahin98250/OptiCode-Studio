@@ -68,6 +68,13 @@ type OpticalGuideState = {
 };
 
 type OpticalGuideRect = { left:number; top:number; width:number; height:number; };
+type OpticalGuideBox = {
+  x:number;
+  y:number;
+  width:number;
+  height:number;
+  corners?:Array<{x:number;y:number}>;
+};
 
 type OpticalGuideDiagnostics = {
   framing:'searching'|'good'|'off';
@@ -954,8 +961,11 @@ export function Transfer() {
           const found=await nativeDetectorRef.current.detect(video);
           const values=found.map(item=>item.rawValue).filter((value):value is string=>Boolean(value));
           const nativeBoxes=found
-            .map(item=>item.boundingBox)
-            .filter((box):box is {x:number;y:number;width:number;height:number}=>Boolean(box));
+            .map(item=>item.boundingBox ? {
+              ...item.boundingBox,
+              corners:item.cornerPoints?.filter(point=>Number.isFinite(point.x)&&Number.isFinite(point.y)),
+            } : null)
+            .filter((box):box is OpticalGuideBox=>Boolean(box));
 
           // BarcodeDetector can publish geometry before the deterministic
           // worker finishes decoding the payload. Use that geometry only when
@@ -1088,7 +1098,7 @@ export function Transfer() {
   };
 
   function updateOpticalGuide(
-    boxes:Array<{x:number;y:number;width:number;height:number}>,
+    boxes:OpticalGuideBox[],
     frameWidth:number,
     frameHeight:number,
     detected:boolean,
@@ -1200,7 +1210,20 @@ export function Transfer() {
       const cy=(guideBox.y+guideHeight/2)/Math.max(1,frameHeight);
       const centered=Math.abs(cx-.5)<.10 && Math.abs(cy-.5)<.10;
       const primaryAspect=primary.width/Math.max(1,primary.height);
-      const perspectiveOk=primaryAspect>=.72 && primaryAspect<=1.28;
+      const corners=primary.corners && primary.corners.length>=4 ? primary.corners.slice(0,4) : null;
+      const distanceBetween=(a:{x:number;y:number},b:{x:number;y:number})=>Math.hypot(a.x-b.x,a.y-b.y);
+      const perspectiveError=corners
+        ? (()=>{
+            const top=distanceBetween(corners[0],corners[1]);
+            const right=distanceBetween(corners[1],corners[2]);
+            const bottom=distanceBetween(corners[2],corners[3]);
+            const left=distanceBetween(corners[3],corners[0]);
+            const avgH=Math.max(1,(top+bottom)/2);
+            const avgV=Math.max(1,(left+right)/2);
+            return Math.max(Math.abs(top-bottom)/avgH,Math.abs(left-right)/avgV);
+          })()
+        : Math.max(0,Math.abs(Math.log(Math.max(.35,Math.min(2.8,primaryAspect)))));
+      const perspectiveOk=perspectiveError<.30;
       const edgeMargin=.025;
       const cropped=guideBox.x/frameWidth<edgeMargin || guideBox.y/frameHeight<edgeMargin ||
         (guideBox.right/frameWidth)>(1-edgeMargin) || (guideBox.bottom/frameHeight)>(1-edgeMargin);
@@ -1686,17 +1709,26 @@ export function Transfer() {
             const frameMetrics=estimateOpticalFrameMetrics(image);
             if(decoded.values.length>0){
               const guideBoxes=(decoded.boxes ?? []).map(box=>useCenterRecovery
-                ? {
-                    x:Math.floor((sourceWidth-Math.min(sourceWidth,sourceHeight))/2 + (box.x/Math.max(1,width))*Math.min(sourceWidth,sourceHeight)),
-                    y:Math.floor((sourceHeight-Math.min(sourceWidth,sourceHeight))/2 + (box.y/Math.max(1,height))*Math.min(sourceWidth,sourceHeight)),
-                    width:Math.max(1,Math.floor((box.width/Math.max(1,width))*Math.min(sourceWidth,sourceHeight))),
-                    height:Math.max(1,Math.floor((box.height/Math.max(1,height))*Math.min(sourceWidth,sourceHeight))),
-                  }
+                ? (()=>{
+                    const cropSize=Math.min(sourceWidth,sourceHeight);
+                    const offsetX=(sourceWidth-cropSize)/2;
+                    const offsetY=(sourceHeight-cropSize)/2;
+                    const scaleX=cropSize/Math.max(1,width);
+                    const scaleY=cropSize/Math.max(1,height);
+                    return {
+                      x:Math.floor(offsetX+box.x*scaleX),
+                      y:Math.floor(offsetY+box.y*scaleY),
+                      width:Math.max(1,Math.floor(box.width*scaleX)),
+                      height:Math.max(1,Math.floor(box.height*scaleY)),
+                      corners:box.corners?.map(point=>({x:offsetX+point.x*scaleX,y:offsetY+point.y*scaleY})),
+                    };
+                  })()
                 : {
                     x:Math.floor((box.x/Math.max(1,width))*sourceWidth),
                     y:Math.floor((box.y/Math.max(1,height))*sourceHeight),
                     width:Math.max(1,Math.floor((box.width/Math.max(1,width))*sourceWidth)),
                     height:Math.max(1,Math.floor((box.height/Math.max(1,height))*sourceHeight)),
+                    corners:box.corners?.map(point=>({x:(point.x/Math.max(1,width))*sourceWidth,y:(point.y/Math.max(1,height))*sourceHeight})),
                   });
               updateOpticalGuide(guideBoxes,sourceWidth,sourceHeight,true,frameMetrics);
             }else{
