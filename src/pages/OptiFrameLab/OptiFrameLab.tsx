@@ -116,6 +116,11 @@ export function OptiFrameLab() {
   const streamRef = useRef<MediaStream | null>(null);
   const loopRef = useRef<number | null>(null);
   const senderTimerRef = useRef<number | null>(null);
+  const senderRafRef = useRef<number | null>(null);
+  const senderLastPaintAtRef = useRef(0);
+  const senderGroupRef = useRef(0);
+  const senderCadenceAtRef = useRef(0);
+  const senderSurfaceCacheRef = useRef(new Map<string, HTMLCanvasElement>());
   const assemblerRef = useRef(new OptiFrameAssembler());
   const opticalFountainDecoderRef = useRef(new OpticalFountainDecoder());
   const decodePoolRef = useRef(new OptiFrameDecodePool());
@@ -180,16 +185,111 @@ export function OptiFrameLab() {
   useEffect(() => {
     if (!streamPlaying) {
       adaptiveTransmissionRef.current.reset(streamIntervalMs);
+      if (senderRafRef.current !== null) {
+        window.cancelAnimationFrame(senderRafRef.current);
+        senderRafRef.current = null;
+      }
+      senderLastPaintAtRef.current = 0;
       return;
     }
-    senderTimerRef.current = window.setInterval(() => {
-      setStreamIndex(index => (index + laneCount) % streamFrameCount);
-    }, streamIntervalMs);
-    return () => {
-      if (senderTimerRef.current !== null) window.clearInterval(senderTimerRef.current);
-      senderTimerRef.current = null;
+
+    senderGroupRef.current = Math.floor(streamIndex / laneCount);
+    senderLastPaintAtRef.current = 0;
+    senderSurfaceCacheRef.current.clear();
+
+    const drawDirect = (group: number) => {
+      const key = [
+        opticalFountainPlan?.session ?? 'chunk',
+        laneCount,
+        opticalFountainPlan ? 'fountain' : 'frames',
+        group,
+      ].join(':');
+
+      let surface = senderSurfaceCacheRef.current.get(key);
+      if (!surface) {
+        const payloads = opticalFountainPlan
+          ? Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount))
+          : Array.from({ length: laneCount }, (_, lane) =>
+              streamPayload[(group * laneCount + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
+            );
+
+        try {
+          surface = createOptiLaneSurface(
+            payloads,
+            group,
+            streamGroupCount,
+            laneCount,
+            streamFrameCacheRef.current,
+          ).canvas;
+        } catch {
+          return;
+        }
+
+        senderSurfaceCacheRef.current.set(key, surface);
+        while (senderSurfaceCacheRef.current.size > 4) {
+          const oldest = senderSurfaceCacheRef.current.keys().next().value;
+          if (oldest === undefined) break;
+          senderSurfaceCacheRef.current.delete(oldest);
+        }
+      }
+
+      const paint = (target: HTMLCanvasElement | null) => {
+        if (!target || !surface) return;
+        const ctx = target.getContext('2d', { alpha: false, desynchronized: true });
+        if (!ctx) return;
+        if (target.width !== surface.width) target.width = surface.width;
+        if (target.height !== surface.height) target.height = surface.height;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(surface, 0, 0);
+      };
+
+      paint(streamCanvasRef.current);
+      paint(presentationCanvasRef.current);
+
+      // Keep the control UI current at a human-readable cadence rather than
+      // re-rendering React at optical-frame frequency.
+      const now = performance.now();
+      if (now - senderLastPaintAtRef.current >= 500) {
+        senderLastPaintAtRef.current = now;
+        setStreamIndex(group * laneCount);
+      }
     };
-  }, [streamPlaying, streamFrameCount, laneCount, streamIntervalMs]);
+
+    const tick = (now: number) => {
+      if (!streamPlaying) return;
+      if (senderRafRef.current !== null && streamIntervalMs <= 0) {
+        return;
+      }
+      const last = senderLastPaintAtRef.current;
+      if (last === 0 || now - last >= streamIntervalMs) {
+        // senderLastPaintAtRef is reused for UI throttling above, so derive
+        // cadence from a dedicated timestamp local to this loop.
+        drawDirect(senderGroupRef.current);
+        senderGroupRef.current = (senderGroupRef.current + 1) % streamGroupCount;
+        senderCadenceAtRef.current = now;
+      }
+      senderRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    senderCadenceAtRef.current = 0;
+    senderRafRef.current = window.requestAnimationFrame((now) => {
+      if (senderCadenceAtRef.current === 0 || now - senderCadenceAtRef.current >= streamIntervalMs) {
+        drawDirect(senderGroupRef.current);
+        senderGroupRef.current = (senderGroupRef.current + 1) % streamGroupCount;
+        senderCadenceAtRef.current = now;
+      }
+      senderRafRef.current = window.requestAnimationFrame(tick);
+    });
+
+    return () => {
+      if (senderRafRef.current !== null) {
+        window.cancelAnimationFrame(senderRafRef.current);
+        senderRafRef.current = null;
+      }
+      senderLastPaintAtRef.current = 0;
+      senderSurfaceCacheRef.current.clear();
+    };
+  }, [streamPlaying, streamIntervalMs, laneCount, streamGroupCount, streamPayload, opticalFountainPlan]);
 
   const streamSurface = useMemo(() => {
     try {
@@ -235,7 +335,7 @@ export function OptiFrameLab() {
       if (decision.changed && decision.intervalMs !== streamIntervalMs) {
         setStreamIntervalMs(decision.intervalMs);
         setStatus(
-          'Adaptive display cadence · ' +
+          'Direct optical canvas cadence · ' +
           decision.intervalMs +
           ' ms · ' +
           decision.direction +
