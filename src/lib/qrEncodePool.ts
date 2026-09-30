@@ -41,9 +41,9 @@ export class QrEncodePool {
   private readonly cache = new Map<string, QrMatrix>();
   private nextId = 1;
 
-  constructor(size = Math.min(2, Math.max(1, (navigator.hardwareConcurrency || 2) - 2))) {
+  constructor(size = Math.min(4, Math.max(1, (navigator.hardwareConcurrency || 4) - 2))) {
     if (typeof Worker === 'undefined') return;
-    const count = Math.max(1, Math.min(2, size));
+    const count = Math.max(1, Math.min(4, size));
     for (let index = 0; index < count; index += 1) this.addWorker(index);
   }
 
