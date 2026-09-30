@@ -372,7 +372,8 @@ export function Transfer() {
     groupIndex:number,
     fountainMode:boolean,
   ){
-    const grid=fountainMode ? (getDisplayLaneCount() === 1 ? 1 : getDisplayLaneCount() === 2 ? 2 : FOUNTAIN_GRID_SIZE) : 1;
+    const displayLanes=getDisplayLaneCount();
+    const grid=displayLanes === 1 ? 1 : displayLanes === 2 ? 2 : 4;
     const totalGroups=fountainMode
       ? Math.max(1,Math.ceil((plan as FountainPlan).recommended/grid))
       : Math.max(1,Math.ceil((plan as Awaited<ReturnType<typeof createTransfer>>).total/grid));
