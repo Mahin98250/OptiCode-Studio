@@ -2,6 +2,7 @@ import type { OptiLaneCount } from './optiframeLanes';
 
 type SurfaceJob = {
   id: number;
+  generation: number;
   key: string;
   baseSequence: number;
   total: number;
@@ -30,6 +31,7 @@ export class OptiFrameSurfacePool {
   private readonly pending = new Map<number, SurfaceJob>();
   private readonly ready = new Map<string, ImageBitmap>();
   private nextId = 1;
+  private generation = 0;
 
   constructor(
     size = Math.min(2, Math.max(1, (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2) - 1)),
@@ -52,9 +54,13 @@ export class OptiFrameSurfacePool {
           slot.busy = false;
 
           if (event.data.bitmap) {
-            const previous = this.ready.get(job.key);
-            previous?.close();
-            this.ready.set(job.key, event.data.bitmap);
+            if (job.generation === this.generation) {
+              const previous = this.ready.get(job.key);
+              previous?.close();
+              this.ready.set(job.key, event.data.bitmap);
+            } else {
+              event.data.bitmap.close();
+            }
           }
 
           this.dispatch();
@@ -98,6 +104,7 @@ export class OptiFrameSurfacePool {
 
     const job: SurfaceJob = {
       id: this.nextId++,
+      generation: this.generation,
       key,
       baseSequence,
       total,
@@ -116,6 +123,7 @@ export class OptiFrameSurfacePool {
   }
 
   clear() {
+    this.generation += 1;
     for (const bitmap of this.ready.values()) bitmap.close();
     this.ready.clear();
     this.queue.length = 0;
