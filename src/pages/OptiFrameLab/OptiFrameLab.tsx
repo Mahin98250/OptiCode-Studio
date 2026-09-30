@@ -6,7 +6,7 @@ import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, getOptiFr
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from '../../lib/optiframeStream';
 import { OptiFrameDecodePool } from '../../lib/optiframeDecodePool';
 import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
-import { createOptiFrameCanvasCache, createOptiLaneSurface, cropOptiLaneGrid, type OptiLaneCount } from '../../lib/optiframeLanes';
+import { createOptiFrameCanvasCache, createOptiLaneSurface, cropOptiLaneGrid, getOptiLaneLayout, type OptiLaneCount } from '../../lib/optiframeLanes';
 import { decodeOptiCodeFileTransfer, type OptiCodeFileTransfer } from '../../lib/opticodeTransfer';
 import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_OVERHEAD, parseOpticalFountainFrame, type OpticalFountainPlan } from '../../lib/opticalFountain';
 
@@ -610,19 +610,20 @@ export function OptiFrameLab() {
       const leadMs = Math.min(80, Math.max(0, nowGrid - trackedGridLastAtRef.current));
       const predictedCenterX = bounds.x + bounds.width / 2 + trackedGridVelocityRef.current.x * leadMs / 1000;
       const predictedCenterY = bounds.y + bounds.height / 2 + trackedGridVelocityRef.current.y * leadMs / 1000;
-      const targetAspect = laneCount === 4 ? 1 : 2;
+      const layout = getOptiLaneLayout(laneCount);
+      const targetAspect = layout.columns / layout.rows;
       const padding = Math.max(30, Math.max(bounds.width, bounds.height) * 0.20);
-      let roiWidth = Math.max(OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1), bounds.width + padding * 2);
-      let roiHeight = Math.max(OPTIFRAME_SIZE, bounds.height + padding * 2);
+      let roiWidth = Math.max(OPTIFRAME_SIZE * layout.columns, bounds.width + padding * 2);
+      let roiHeight = Math.max(OPTIFRAME_SIZE * layout.rows, bounds.height + padding * 2);
       if (roiWidth / Math.max(1, roiHeight) < targetAspect) roiWidth = roiHeight * targetAspect;
       if (roiWidth / Math.max(1, roiHeight) > targetAspect) roiHeight = roiWidth / targetAspect;
 
       const x = Math.max(0, Math.min(width - roiWidth, Math.round(predictedCenterX - roiWidth / 2)));
       const y = Math.max(0, Math.min(height - roiHeight, Math.round(predictedCenterY - roiHeight / 2)));
-      const roiW = Math.max(OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1), Math.min(width - x, Math.round(roiWidth)));
-      const roiH = Math.max(OPTIFRAME_SIZE, Math.min(height - y, Math.round(roiHeight)));
+      const roiW = Math.max(OPTIFRAME_SIZE * layout.columns, Math.min(width - x, Math.round(roiWidth)));
+      const roiH = Math.max(OPTIFRAME_SIZE * layout.rows, Math.min(height - y, Math.round(roiHeight)));
 
-      if (roiW >= OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1) && roiH >= OPTIFRAME_SIZE) {
+      if (roiW >= OPTIFRAME_SIZE * layout.columns && roiH >= OPTIFRAME_SIZE * layout.rows) {
         if (capture.width !== roiW) capture.width = roiW;
         if (capture.height !== roiH) capture.height = roiH;
         context.imageSmoothingEnabled = false;
@@ -1322,18 +1323,18 @@ export function OptiFrameLab() {
 
         <GlassCard>
           <div className="flex items-center justify-between gap-3">
-            <div><p className="text-sm font-bold text-[var(--text)]">Sharing screen</p><p className="mt-1 text-[10px] uppercase tracking-[.14em] text-[var(--text-muted)]">{OPTIFRAME_SIZE}×{OPTIFRAME_SIZE} protocol · 1× renders 768 px · 2×/4× render 384 px lanes</p></div>
+            <div><p className="text-sm font-bold text-[var(--text)]">Sharing screen</p><p className="mt-1 text-[10px] uppercase tracking-[.14em] text-[var(--text-muted)]">{OPTIFRAME_SIZE}×{OPTIFRAME_SIZE} protocol · 1× 720 px · 2×/4× 540 px lanes · 6× extreme 1080×720 3:2 surface</p></div>
             <span className="rounded-full border border-[var(--border)] px-3 py-2 text-[10px] font-bold text-[var(--text-muted)]">{streamFrameCount.toLocaleString()} stream positions</span>
           </div>
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Multiple codes</p><p className="mt-1 text-xs text-[var(--text-muted)]">The screen can show more than one code at a time.</p></div><div className="flex rounded-full border border-[var(--border)] p-1">{([1, 2, 4] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div></div>
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Multiple codes</p><p className="mt-1 text-xs text-[var(--text-muted)]">The screen can show more than one code at a time.</p></div><div className="flex rounded-full border border-[var(--border)] p-1">{([1, 2, 4, 6] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div></div>
           <div className="mt-5 grid place-items-center rounded-[26px] bg-white p-4">
             {streamSurface ? (
               <canvas
                 ref={streamCanvasRef}
                 aria-label="OptiFrame optical stream surface"
-                className={`optiframe-surface block h-auto w-full max-w-[760px] ${laneCount === 2 ? 'aspect-[2/1]' : 'aspect-square'}`}
+                className={`optiframe-surface block h-auto w-full max-w-[760px] ${getOptiLaneLayout(laneCount).columns === 3 ? 'aspect-[3/2]' : getOptiLaneLayout(laneCount).columns === 2 && getOptiLaneLayout(laneCount).rows === 1 ? 'aspect-[2/1]' : 'aspect-square'}`}
               />
-            ) : <div className={laneCount === 2 ? 'aspect-[2/1] w-full max-w-[760px]' : 'aspect-square w-full max-w-[760px]'} />}
+            ) : <div className={getOptiLaneLayout(laneCount).columns === 3 ? 'aspect-[3/2] w-full max-w-[760px]' : getOptiLaneLayout(laneCount).columns === 2 && getOptiLaneLayout(laneCount).rows === 1 ? 'aspect-[2/1] w-full max-w-[760px]' : 'aspect-square w-full max-w-[760px]'} />}
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <GlassButton onClick={() => setStreamPlaying(value => !value)}>{streamPlaying ? <Pause size={14}/> : <Play size={14}/>} {streamPlaying ? 'Pause' : 'Start sharing'}</GlassButton>
@@ -1356,7 +1357,7 @@ export function OptiFrameLab() {
             <button onClick={() => setStreamIndex(index => (index + streamFrameCount - laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Previous</button>
             <button onClick={() => setStreamIndex(index => (index + laneCount) % streamFrameCount)} className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]">Next</button>
           </div>
-          <p className="mt-3 text-xs text-[var(--text-muted)]">{transferFile ? 'High-speed file mode uses binary fountain packets directly inside each OptiFrame. Increase the lane count on both devices for higher physical throughput; actual goodput depends on screen refresh, camera exposure, focus and decoder latency. ' : ''}{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${laneCount === 2 ? '2:1' : '1:1'} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
+          <p className="mt-3 text-xs text-[var(--text-muted)]">{transferFile ? 'High-speed file mode uses binary fountain packets directly inside each OptiFrame. Increase the lane count on both devices for higher physical throughput; actual goodput depends on screen refresh, camera exposure, focus and decoder latency. ' : ''}{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once; the receiver uses the matching ${getOptiLaneLayout(laneCount).columns + ':' + getOptiLaneLayout(laneCount).rows} grid aspect ratio and decodes lanes through the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
         </GlassCard>
       </div>
 
