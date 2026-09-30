@@ -271,6 +271,7 @@ export function Transfer() {
   const opticalVisualVelocityRef=useRef({left:0,top:0,width:0,height:0});
   const opticalVisualRafRef=useRef<number|null>(null);
   const opticalGuideOverlayRef=useRef<HTMLDivElement|null>(null);
+  const opticalGuideVisibleRef=useRef(false);
   const opticalGroupBoxRef=useRef<{x:number;y:number;width:number;height:number}|null>(null);
   const opticalGroupLastSeenRef=useRef(0);
   const decodeMaxDimensionRef=useRef(1120);
@@ -1230,10 +1231,13 @@ export function Transfer() {
         height:Math.max(1,Math.min(100,(square.height/frameHeight)*contentHeight/elementHeight*100)),
       };
       opticalVisualTargetRef.current=targetRect;
-      // Keep React state aligned with the latest detector target so unrelated
-      // UI renders cannot overwrite the live DOM position with a stale value.
-      // The 60 FPS RAF still owns the in-between animation frames.
-      setOpticalGuideRect(targetRect);
+      // React only owns visibility. Position/size are mutated directly on the
+      // overlay DOM node at display-frame cadence, avoiding a component-tree
+      // render for every optical movement.
+      if(!opticalGuideVisibleRef.current){
+        opticalGuideVisibleRef.current=true;
+        setOpticalGuideRect(targetRect);
+      }
       if(!opticalVisualCurrentRef.current){
         opticalVisualCurrentRef.current=targetRect;
       }
@@ -1561,6 +1565,7 @@ export function Transfer() {
     opticalVisualTargetRef.current=null;
     opticalVisualCurrentRef.current=null;
     opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
+    opticalGuideVisibleRef.current=false;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideRect(null);
     guideDistanceRef.current='unknown';
@@ -2014,6 +2019,7 @@ export function Transfer() {
     opticalVisualTargetRef.current=null;
     opticalVisualCurrentRef.current=null;
     opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
+    opticalGuideVisibleRef.current=false;
     setOpticalGuideRect(null);
     opticalTrackRef.current=null;
     opticalGroupBoxRef.current=null;
@@ -2211,12 +2217,6 @@ export function Transfer() {
                 <div
                   ref={opticalGuideOverlayRef}
                   className="absolute will-change-[left,top,width,height]"
-                  style={{
-                    left:opticalGuideRect.left+'%',
-                    top:opticalGuideRect.top+'%',
-                    width:opticalGuideRect.width+'%',
-                    height:opticalGuideRect.height+'%',
-                  }}
                 >
                   <div className={opticalTrack.predicted
                     ? 'absolute inset-0 rounded-[22px] border border-cyan-200/70 opacity-60'
