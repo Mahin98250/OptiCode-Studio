@@ -10,6 +10,7 @@ const requiredFiles = [
   'icon-192.svg',
   'icon-512.svg',
   'favicon.svg',
+  'zxing_reader.wasm',
 ];
 
 for (const file of requiredFiles) {
