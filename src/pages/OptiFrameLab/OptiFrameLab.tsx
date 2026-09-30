@@ -585,55 +585,52 @@ export function OptiFrameLab() {
       trackedAnchorsRef.current &&
       framesSinceFullScanRef.current < reacquireEveryFrames;
 
-    captureOriginRef.current = { x: 0, y: 0 };
-    if (capture.width !== width) capture.width = width;
-    if (capture.height !== height) capture.height = height;
-    context.imageSmoothingEnabled = false;
-    context.drawImage(video, 0, 0, width, height);
-    let image: ImageData = context.getImageData(0, 0, width, height);
-
-    let directTrackedCrop: { image: ImageData; offsetX: number; offsetY: number } | null = null;
-    let directTrackedGrid: { image: ImageData; offsetX: number; offsetY: number } | null = null;
-
     const directGridTrackingAvailable =
       laneCount > 1 &&
       !acquisitionTestRef.current &&
       trackedLaneAnchorsRef.current.size >= laneCount &&
+      trackedGridBoundsRef.current &&
       framesSinceFullScanRef.current < reacquireEveryFrames;
 
+    captureOriginRef.current = { x: 0, y: 0 };
+    let image: ImageData;
+
+    const captureFullFrame = () => {
+      if (capture.width !== width) capture.width = width;
+      if (capture.height !== height) capture.height = height;
+      context.imageSmoothingEnabled = false;
+      context.drawImage(video, 0, 0, width, height);
+      return context.getImageData(0, 0, width, height);
+    };
+
     if (directGridTrackingAvailable) {
-      const measured = trackedGridBoundsRef.current;
-      if (measured) {
-        const nowGrid = performance.now();
-        const leadMs = Math.min(80, Math.max(0, nowGrid - trackedGridLastAtRef.current));
-        const predictedCenterX = measured.x + measured.width / 2 + trackedGridVelocityRef.current.x * leadMs / 1000;
-        const predictedCenterY = measured.y + measured.height / 2 + trackedGridVelocityRef.current.y * leadMs / 1000;
-        const targetAspect = laneCount === 4 ? 1 : 2;
-        const padding = Math.max(30, Math.max(measured.width, measured.height) * 0.20);
-        let roiWidth = measured.width + padding * 2;
-        let roiHeight = measured.height + padding * 2;
-        if (roiWidth / Math.max(1, roiHeight) < targetAspect) roiWidth = roiHeight * targetAspect;
-        if (roiWidth / Math.max(1, roiHeight) > targetAspect) roiHeight = roiWidth / targetAspect;
+      const bounds = trackedGridBoundsRef.current!;
+      const nowGrid = performance.now();
+      const leadMs = Math.min(80, Math.max(0, nowGrid - trackedGridLastAtRef.current));
+      const predictedCenterX = bounds.x + bounds.width / 2 + trackedGridVelocityRef.current.x * leadMs / 1000;
+      const predictedCenterY = bounds.y + bounds.height / 2 + trackedGridVelocityRef.current.y * leadMs / 1000;
+      const targetAspect = laneCount === 4 ? 1 : 2;
+      const padding = Math.max(30, Math.max(bounds.width, bounds.height) * 0.20);
+      let roiWidth = Math.max(OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1), bounds.width + padding * 2);
+      let roiHeight = Math.max(OPTIFRAME_SIZE, bounds.height + padding * 2);
+      if (roiWidth / Math.max(1, roiHeight) < targetAspect) roiWidth = roiHeight * targetAspect;
+      if (roiWidth / Math.max(1, roiHeight) > targetAspect) roiHeight = roiWidth / targetAspect;
 
-        const x = Math.max(0, Math.min(width - roiWidth, Math.round(predictedCenterX - roiWidth / 2)));
-        const y = Math.max(0, Math.min(height - roiHeight, Math.round(predictedCenterY - roiHeight / 2)));
-        const roiW = Math.max(OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1), Math.min(width - x, Math.round(roiWidth)));
-        const roiH = Math.max(OPTIFRAME_SIZE, Math.min(height - y, Math.round(roiHeight)));
+      const x = Math.max(0, Math.min(width - roiWidth, Math.round(predictedCenterX - roiWidth / 2)));
+      const y = Math.max(0, Math.min(height - roiHeight, Math.round(predictedCenterY - roiHeight / 2)));
+      const roiW = Math.max(OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1), Math.min(width - x, Math.round(roiWidth)));
+      const roiH = Math.max(OPTIFRAME_SIZE, Math.min(height - y, Math.round(roiHeight)));
 
-        if (roiW >= OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1) && roiH >= OPTIFRAME_SIZE) {
-          if (capture.width !== roiW) capture.width = roiW;
-          if (capture.height !== roiH) capture.height = roiH;
-          context.imageSmoothingEnabled = false;
-          context.drawImage(video, x / scale, y / scale, roiW / scale, roiH / scale, 0, 0, roiW, roiH);
-          image = context.getImageData(0, 0, roiW, roiH);
-          directTrackedGrid = { image, offsetX: x, offsetY: y };
-          captureOriginRef.current = { x, y };
-        }
+      if (roiW >= OPTIFRAME_SIZE * (laneCount === 4 ? 2 : 1) && roiH >= OPTIFRAME_SIZE) {
+        if (capture.width !== roiW) capture.width = roiW;
+        if (capture.height !== roiH) capture.height = roiH;
+        context.imageSmoothingEnabled = false;
+        context.drawImage(video, x / scale, y / scale, roiW / scale, roiH / scale, 0, 0, roiW, roiH);
+        image = context.getImageData(0, 0, roiW, roiH);
+        captureOriginRef.current = { x, y };
+      } else {
+        image = captureFullFrame();
       }
-    }
-
-    if (directTrackedGrid) {
-      // Skip the full-frame copy when the multi-lane geometry is already locked.
     } else if (directTrackingAvailable) {
       const anchors = trackedAnchorsRef.current!;
       const minX = Math.min(...anchors.map(anchor => anchor.x));
@@ -654,20 +651,14 @@ export function OptiFrameLab() {
         if (capture.width !== roiWidth) capture.width = roiWidth;
         if (capture.height !== roiHeight) capture.height = roiHeight;
         context.imageSmoothingEnabled = false;
-        context.drawImage(
-          video,
-          x / scale,
-          y / scale,
-          roiWidth / scale,
-          roiHeight / scale,
-          0,
-          0,
-          roiWidth,
-          roiHeight,
-        );
+        context.drawImage(video, x / scale, y / scale, roiWidth / scale, roiHeight / scale, 0, 0, roiWidth, roiHeight);
         image = context.getImageData(0, 0, roiWidth, roiHeight);
-        directTrackedCrop = { image, offsetX: x, offsetY: y };
+        captureOriginRef.current = { x, y };
+      } else {
+        image = captureFullFrame();
       }
+    } else {
+      image = captureFullFrame();
     }
 
     if (acquisitionTestRef.current) {
