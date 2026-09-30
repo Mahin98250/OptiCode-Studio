@@ -213,6 +213,7 @@ export function Transfer() {
       opticalVisualTargetRef.current=null;
       opticalVisualCurrentRef.current=null;
       opticalVisualVelocityRef.current={left:0,top:0,width:0,height:0};
+      opticalGuideVisibleRef.current=false;
       setOpticalGuideRect(null);
       return;
     }
