@@ -30,8 +30,8 @@ function boxFromPosition(position:unknown):DecodeBox|undefined{
     bottomRight?:{x:number;y:number};
   }|undefined;
   if(!p) return;
-  const points=[p.topLeft,p.topRight,p.bottomLeft,p.bottomRight].filter((point):point is {x:number;y:number}=>
-    Boolean(point) && Number.isFinite(point.x) && Number.isFinite(point.y)
+  const points=([p.topLeft,p.topRight,p.bottomLeft,p.bottomRight].filter(Boolean) as Array<{x:number;y:number}>).filter(point=>
+    Number.isFinite(point.x) && Number.isFinite(point.y)
   );
   if(points.length<2)return;
   const xs=points.map(point=>point.x);
@@ -46,7 +46,7 @@ function boxFromPosition(position:unknown):DecodeBox|undefined{
 
 async function decodeWasm(data:Uint8ClampedArray,width:number,height:number){
   const results=await readBarcodes(
-    {data,width,height},
+    {data:new Uint8ClampedArray(data),width,height} as unknown as ImageData,
     {
       formats:['QRCode'],
       maxNumberOfSymbols:4,
