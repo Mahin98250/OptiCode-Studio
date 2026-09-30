@@ -641,18 +641,18 @@ async function optiFrameWorkerFallbackDiagnostic() {
 }
 
 async function optiFrameMultiLaneRoundTrip() {
-  const payloads = Array.from({ length: 4 }, (_, lane) =>
+  const payloads = Array.from({ length: 16 }, (_, lane) =>
     new TextEncoder().encode('OptiCode lane ' + lane + ' · '.repeat(40)),
   );
 
-  for (const laneCount of [1, 2, 4] as OptiLaneCount[]) {
+  for (const laneCount of [1, 2, 4, 6, 9, 12, 16] as OptiLaneCount[]) {
     const selected = payloads.slice(0, laneCount);
     const surface = createOptiLaneSurface(selected, 12, 40, laneCount);
     const ctx = surface.canvas.getContext('2d', { willReadFrequently: true });
     assert(ctx, 'Multi-lane fixture canvas context unavailable.');
     const image = ctx.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
     const lanes = cropOptiLaneGrid(image, laneCount);
-    const expectedLaneSize = laneCount === 1 ? OPTIFRAME_SIZE * 4 : OPTIFRAME_SIZE * 3;
+    const expectedLaneSize = OPTIFRAME_SIZE * (laneCount === 1 ? 4 : laneCount === 2 || laneCount === 4 ? 3 : 2);
     assert(lanes.length === laneCount, 'Expected ' + laneCount + ' cropped lanes, got ' + lanes.length + '.');
     assert(lanes.every(lane => lane.image.width === expectedLaneSize && lane.image.height === expectedLaneSize), 'Multi-lane crop did not preserve the physical lane raster.');
 
@@ -684,7 +684,7 @@ async function optiFrameMultiLaneRoundTrip() {
   cache.clear();
   assert(cache.size() === 0, 'OptiFrame canvas cache did not clear.');
 
-  return '1×, 2×, and 4× lane surfaces cropped/decoded · bounded encoded-frame cache reuse verified';
+  return '1×/2×/4×/6×/9×/12×/16× lane surfaces cropped/decoded · bounded encoded-frame cache reuse verified';
 }
 
 async function optiFrameEncodeThroughputDiagnostic() {
