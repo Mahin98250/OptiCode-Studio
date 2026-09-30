@@ -129,6 +129,7 @@ export function OptiFrameLab() {
   const presentationCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const seenSequenceRef = useRef(new Set<number>());
   const trackedAnchorsRef = useRef<OptiFramePerspectiveDiagnostics['anchors'] | null>(null);
+  const trackedLaneAnchorsRef = useRef(new Map<number, OptiFramePerspectiveDiagnostics['anchors']>());
   const framesSinceFullScanRef = useRef(0);
   const acquisitionFailureRef = useRef(0);
   const acquisitionTestRef = useRef(false);
@@ -634,8 +635,16 @@ export function OptiFrameLab() {
       return { image: imageData, offsetX: x, offsetY: y };
     };
 
-    const runWorker = async (target: ImageData) => {
-      const job = decodePoolRef.current.decode(target.data.buffer.slice(0), target.width, target.height);
+    const runWorker = async (
+      target: ImageData,
+      previousAnchors: OptiFramePerspectiveDiagnostics['anchors'] | null = null,
+    ) => {
+      const job = decodePoolRef.current.decode(
+        target.data.buffer.slice(0),
+        target.width,
+        target.height,
+        previousAnchors,
+      );
       if (!job) return { result: null as Awaited<ReturnType<OptiFrameDecodePool['decode']>>, dropped: true, failed: false };
       try {
         return { result: await job, dropped: false, failed: false };
@@ -652,9 +661,12 @@ export function OptiFrameLab() {
       }
     };
 
-    const runWorkerWithBoundedFallback = async (target: ImageData) => {
+    const runWorkerWithBoundedFallback = async (
+      target: ImageData,
+      previousAnchors: OptiFramePerspectiveDiagnostics['anchors'] | null = null,
+    ) => {
       const capacityBefore = decodePoolRef.current.capacity;
-      const worker = await runWorker(target);
+      const worker = await runWorker(target, previousAnchors);
       if (worker.result) return worker;
 
       // A normal worker decode miss is not a worker failure. Only fall back
@@ -693,6 +705,11 @@ export function OptiFrameLab() {
           buffer: lane.image.data.buffer.slice(0),
           width: lane.image.width,
           height: lane.image.height,
+          previousAnchors: trackedLaneAnchorsRef.current.get(lane.lane)?.map(anchor => ({
+            ...anchor,
+            x: anchor.x - lane.offsetX,
+            y: anchor.y - lane.offsetY,
+          })) as OptiFramePerspectiveDiagnostics['anchors'] | undefined,
         })),
       );
 
@@ -766,6 +783,13 @@ export function OptiFrameLab() {
         if (seenSequenceRef.current.has(result.frame.sequence)) duplicateCount += 1;
         assembly = assemblerRef.current.add(result.frame);
         seenSequenceRef.current.add(result.frame.sequence);
+
+        const absoluteAnchors = result.diagnostics.anchors.map(anchor => ({
+          ...anchor,
+          x: anchor.x + entry.lane.offsetX,
+          y: anchor.y + entry.lane.offsetY,
+        })) as OptiFramePerspectiveDiagnostics['anchors'];
+        trackedLaneAnchorsRef.current.set(entry.lane.lane, absoluteAnchors);
       }
 
       const elapsedFromStart = cameraStats.startedAt ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000) : 0;
@@ -804,7 +828,14 @@ export function OptiFrameLab() {
     const shouldFullScan = !trackedCrop || framesSinceFullScanRef.current >= reacquireEveryFrames;
     if (trackedCrop && !shouldFullScan) {
       usedTrackedCrop = true;
-      const worker = await runWorkerWithBoundedFallback(trackedCrop.image);
+      const trackedPrevious = trackedAnchorsRef.current
+        ? trackedAnchorsRef.current.map(anchor => ({
+            ...anchor,
+            x: anchor.x - trackedCrop.offsetX,
+            y: anchor.y - trackedCrop.offsetY,
+          })) as OptiFramePerspectiveDiagnostics['anchors']
+        : null;
+      const worker = await runWorkerWithBoundedFallback(trackedCrop.image, trackedPrevious);
       workerResult = worker.result && !worker.failed && !worker.dropped
         ? worker.result as Awaited<ReturnType<OptiFrameDecodePool['decode']>>
         : null;
@@ -833,6 +864,7 @@ export function OptiFrameLab() {
         y: anchor.y + cropOffset.y,
       })) as OptiFramePerspectiveDiagnostics['anchors'];
       trackedAnchorsRef.current = absoluteAnchors;
+      trackedLaneAnchorsRef.current.set(0, absoluteAnchors);
       setAcquisition({
         stage: 'ready',
         anchors: absoluteAnchors,
@@ -943,6 +975,7 @@ export function OptiFrameLab() {
     opticalFountainDecoderRef.current.reset();
     seenSequenceRef.current.clear();
     trackedAnchorsRef.current = null;
+    trackedLaneAnchorsRef.current.clear();
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
     setCameraDecoded('');
