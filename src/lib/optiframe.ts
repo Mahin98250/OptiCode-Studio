@@ -81,14 +81,30 @@ function finderValue(r: number, c: number) {
   return origin ? (finderBit(r - origin[0], c - origin[1]) ? 3 : 0) : -1;
 }
 
-function capacityBits() {
-  let n = 0;
+// Precompute the immutable protocol raster once. The hot encode/decode paths
+// then walk only data cells instead of calling zoneOrigin() for every pixel.
+const DATA_CELL_COORDS: Uint16Array = (() => {
+  const cells: number[] = [];
   for (let r = 0; r < OPTIFRAME_SIZE; r++) {
     for (let c = 0; c < OPTIFRAME_SIZE; c++) {
-      if (!isFinderCell(r, c)) n += 2;
+      if (!isFinderCell(r, c)) cells.push((r << 8) | c);
     }
   }
-  return n - HEADER_BITS;
+  return Uint16Array.from(cells);
+})();
+
+const FINDER_CELL_COORDS: Uint16Array = (() => {
+  const cells: number[] = [];
+  for (let r = 0; r < OPTIFRAME_SIZE; r++) {
+    for (let c = 0; c < OPTIFRAME_SIZE; c++) {
+      if (isFinderCell(r, c)) cells.push((r << 8) | c);
+    }
+  }
+  return Uint16Array.from(cells);
+})();
+
+function capacityBits() {
+  return DATA_CELL_COORDS.length * 2 - HEADER_BITS;
 }
 
 export function getOptiFrameCapacity() {
@@ -131,30 +147,41 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
   if (!ctx) throw new Error('Canvas unavailable.');
 
   const image = ctx.createImageData(OPTIFRAME_SIZE, OPTIFRAME_SIZE);
+  image.data.fill(255);
+  for (const coord of FINDER_CELL_COORDS) {
+    const r = coord >>> 8;
+    const col = coord & 255;
+    const i = (r * OPTIFRAME_SIZE + col) * 4;
+    const origin = zoneOrigin(r, col)!;
+    const level = finderBit(r - origin[0], col - origin[1]) ? 3 : 0;
+    const lum = LUMINANCE_LEVELS[level];
+    image.data[i] = lum;
+    image.data[i + 1] = lum;
+    image.data[i + 2] = lum;
+  }
+
   let cursorBits = 0;
-  for (let r = 0; r < OPTIFRAME_SIZE; r++) {
-    for (let col = 0; col < OPTIFRAME_SIZE; col++) {
-      const i = (r * OPTIFRAME_SIZE + col) * 4;
-      let level = finderValue(r, col);
-      if (level < 0) {
-        if (cursorBits < HEADER_BITS) {
-          const headerByte = header[cursorBits >>> 3];
-          const shift = 6 - (cursorBits & 7);
-          level = (headerByte >>> shift) & 3;
-        } else {
-          const bodyBit = cursorBits - HEADER_BITS;
-          const bodyByte = body[bodyBit >>> 3];
-          const shift = 6 - (bodyBit & 7);
-          level = (bodyByte >>> shift) & 3;
-        }
-        cursorBits += 2;
-      }
-      const lum = LUMINANCE_LEVELS[level as 0 | 1 | 2 | 3];
-      image.data[i] = lum;
-      image.data[i + 1] = lum;
-      image.data[i + 2] = lum;
-      image.data[i + 3] = 255;
+  for (const coord of DATA_CELL_COORDS) {
+    const r = coord >>> 8;
+    const col = coord & 255;
+    const i = (r * OPTIFRAME_SIZE + col) * 4;
+    let level: number;
+    if (cursorBits < HEADER_BITS) {
+      const headerByte = header[cursorBits >>> 3];
+      const shift = 6 - (cursorBits & 7);
+      level = (headerByte >>> shift) & 3;
+    } else {
+      const bodyBit = cursorBits - HEADER_BITS;
+      const bodyByte = body[bodyBit >>> 3];
+      const shift = 6 - (bodyBit & 7);
+      level = (bodyByte >>> shift) & 3;
     }
+    const lum = LUMINANCE_LEVELS[level as 0 | 1 | 2 | 3];
+    image.data[i] = lum;
+    image.data[i + 1] = lum;
+    image.data[i + 2] = lum;
+    image.data[i + 3] = 255;
+    cursorBits += 2;
   }
   ctx.putImageData(image, 0, 0);
   return { canvas, frame: { version: HEADER_VERSION, sequence, total, payload } as OptiFrame };
@@ -218,15 +245,14 @@ function decodeAxisAlignedImage(image: ImageData) {
   if (image.width !== OPTIFRAME_SIZE || image.height !== OPTIFRAME_SIZE) return null;
   const packed = new Uint8Array(9 + Math.ceil((capacityBits() + 7) / 8));
   let cursorBits = 0;
-  for (let r = 0; r < OPTIFRAME_SIZE; r++) {
-    for (let col = 0; col < OPTIFRAME_SIZE; col++) {
-      if (isFinderCell(r, col)) continue;
-      const i = (r * OPTIFRAME_SIZE + col) * 4;
-      const level = quantize((image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3);
-      const byteIndex = cursorBits >>> 3;
-      packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
-      cursorBits += 2;
-    }
+  for (const coord of DATA_CELL_COORDS) {
+    const r = coord >>> 8;
+    const col = coord & 255;
+    const i = (r * OPTIFRAME_SIZE + col) * 4;
+    const level = quantize((image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3);
+    const byteIndex = cursorBits >>> 3;
+    packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
+    cursorBits += 2;
   }
   return decodePackedFrame(packed);
 }
@@ -627,12 +653,12 @@ function decodePerspectiveFromAnchors(image: ImageData, anchors: PerspectiveAnch
   const shortest = Math.max(1, Math.min(topWidth, bottomWidth, leftHeight, rightHeight));
   if (longest / shortest > 2.75) return null;
 
-  const packed = new Uint8Array(8 + Math.ceil((capacityBits() + 7) / 8));
+  const packed = new Uint8Array(9 + Math.ceil((capacityBits() + 7) / 8));
   let cursorBits = 0;
-  for (let r = 0; r < OPTIFRAME_SIZE; r++) {
-    for (let col = 0; col < OPTIFRAME_SIZE; col++) {
-      if (isFinderCell(r, col)) continue;
-      const [sx, sy] = project(reverse, col, r);
+  for (const coord of DATA_CELL_COORDS) {
+    const r = coord >>> 8;
+    const col = coord & 255;
+    const [sx, sy] = project(reverse, col, r);
       if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) return null;
       const raw = sampleModule(image, sx, sy, moduleScale);
       const normalized = Math.max(0, Math.min(255, (raw - calibration.dark) * 255 / (calibration.light - calibration.dark)));
