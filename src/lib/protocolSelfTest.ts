@@ -2,7 +2,7 @@ import { analyzeScan } from './scan';
 import { QrEncodePool } from './qrEncodePool';
 import { QrDecodePool } from './qrDecodePool';
 import { createQrMatrices, drawQrMatricesToCanvas } from './qrCanvas';
-import { decodeOptiFramePerspective, optiFrameSelfTest } from './optiframe';
+import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, optiFrameSelfTest } from './optiframe';
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from './optiframeStream';
 import { cropOptiLaneGrid, createOptiFrameCanvasCache, createOptiLaneSurface, getOptiLaneLayout, type OptiLaneCount } from './optiframeLanes';
 import { OptiFrameDecodePool } from './optiframeDecodePool';
