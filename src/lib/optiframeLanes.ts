@@ -100,7 +100,7 @@ export function createOptiLaneSurface(
       ? frameCache.get(payloads[lane], sequence, total)
       : encodeOptiFrame(payloads[lane], sequence, total).canvas;
     frames.push({
-      version: 1,
+      version: 2,
       sequence,
       total,
       payload: payloads[lane],
