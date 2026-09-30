@@ -1346,11 +1346,12 @@ export function Transfer() {
       const referenceCy=reference.y+reference.height/2;
       const diagonal=Math.max(8,Math.hypot(reference.width,reference.height));
       const centerDistance=Math.hypot(candidateCx-referenceCx,candidateCy-referenceCy)/diagonal;
-      const centerScore=Math.exp(-Math.pow(centerDistance/.78,2));
+      const centerScore=Math.exp(-Math.pow(centerDistance/.72,2));
       const widthRatio=Math.min(candidate.width/Math.max(1,reference.width),reference.width/Math.max(1,candidate.width));
       const heightRatio=Math.min(candidate.height/Math.max(1,reference.height),reference.height/Math.max(1,candidate.height));
       const sizeScore=Math.sqrt(Math.max(0,widthRatio*heightRatio));
-      return .56*boxIoU(candidate,reference)+.29*centerScore+.15*sizeScore;
+      const overlap=boxIoU(candidate,reference);
+      return .62*overlap+.28*centerScore+.10*sizeScore;
     };
 
     if(detected && boxes.length>0){
