@@ -457,6 +457,7 @@ type MetaState = {
 
 export class OpticalFountainDecoder {
   private meta: MetaState | null = null;
+  private activeSession = '';
   private totalBlocks = 0;
   private blockBytes = OPTICAL_FOUNTAIN_BLOCK_BYTES;
   private readonly equations = new Map<number, Equation>();
@@ -467,6 +468,7 @@ export class OpticalFountainDecoder {
 
   reset() {
     this.meta = null;
+    this.activeSession = '';
     this.totalBlocks = 0;
     this.blockBytes = OPTICAL_FOUNTAIN_BLOCK_BYTES;
     this.equations.clear();
@@ -479,9 +481,10 @@ export class OpticalFountainDecoder {
   add(frame: OpticalFountainFrame) {
     if (frame.kind === 'meta') {
       if (frame.size > OPTICAL_FOUNTAIN_MAX_FILE_SIZE) throw new Error('Optical fountain file is too large.');
-      if (this.meta && this.meta.session !== frame.session) {
+      if (this.activeSession && this.activeSession !== frame.session) {
         return { ...this.snapshot(false), metaConflict: true };
       }
+      this.activeSession = frame.session;
       this.meta = frame;
       this.totalBlocks = frame.totalBlocks;
       this.blockBytes = frame.blockBytes;
@@ -493,11 +496,16 @@ export class OpticalFountainDecoder {
       return this.snapshot(false);
     }
 
+    if (this.activeSession && this.activeSession !== frame.session) {
+      return { ...this.snapshot(false), metaConflict: true };
+    }
+
     if (this.meta && (this.meta.session !== frame.session || this.meta.totalBlocks !== frame.totalBlocks || this.meta.blockBytes !== frame.blockBytes)) {
       return { ...this.snapshot(false), metaConflict: true };
     }
 
     if (!this.totalBlocks) {
+      this.activeSession = frame.session;
       this.totalBlocks = frame.totalBlocks;
       this.blockBytes = frame.blockBytes;
       this.meta = null;
@@ -575,7 +583,7 @@ export class OpticalFountainDecoder {
 
   snapshot(duplicate = false): OpticalFountainReceiveState & { duplicate: boolean; metaConflict?: boolean } {
     return {
-      session: this.meta?.session ?? '',
+      session: this.activeSession,
       name: this.meta?.name ?? 'OptiFrame transfer',
       mime: this.meta?.mime ?? 'application/octet-stream',
       size: this.meta?.size ?? this.totalBlocks * this.blockBytes,
