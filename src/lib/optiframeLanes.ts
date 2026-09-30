@@ -1,6 +1,6 @@
 import { encodeOptiFrame, OPTIFRAME_SIZE, type OptiFrame } from './optiframe';
 
-export type OptiLaneCount = 1 | 2 | 4;
+export type OptiLaneCount = 1 | 2 | 4 | 6;
 
 export type OptiLaneLayout = {
   columns: number;
@@ -8,7 +8,9 @@ export type OptiLaneLayout = {
 };
 
 export function getOptiLaneLayout(count: OptiLaneCount): OptiLaneLayout {
-  return count === 4 ? { columns: 2, rows: 2 } : { columns: count, rows: 1 };
+  if (count === 6) return { columns: 3, rows: 2 };
+  if (count === 4) return { columns: 2, rows: 2 };
+  return { columns: count, rows: 1 };
 }
 
 export function getOptiLaneSequence(baseSequence: number, lane: number, total: number): number {
@@ -78,10 +80,9 @@ export function createOptiLaneSurface(
   }
 
   const layout = getOptiLaneLayout(laneCount);
-  // Match the physical raster to the available display area. A single lane
-  // uses ~4 px/module (720 px), while 2×/4× grids use ~3 px/module so a
-  // 4-lane 180px protocol grid reaches a native 1080×1080 sender surface.
-  const renderScale = laneCount === 1 ? 4 : 3;
+  // Physical profiles: 1×=4 px/module, 2×/4×=3 px/module, 6×=2 px/module.
+  // The extreme 6-lane profile produces a native 1080×720 3×2 optical surface.
+  const renderScale = laneCount === 1 ? 4 : laneCount === 6 ? 2 : 3;
   const laneRenderSize = OPTIFRAME_SIZE * renderScale;
   const canvas = document.createElement('canvas');
   canvas.width = layout.columns * laneRenderSize;
