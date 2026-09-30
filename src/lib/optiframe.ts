@@ -1,8 +1,8 @@
 const MAGIC = 0x4f50;
-export const OPTIFRAME_SIZE = 128;
-export const OPTIFRAME_MAX_PAYLOAD = 3900;
-const HEADER_BITS = 64;
-const HEADER_VERSION = 1;
+export const OPTIFRAME_SIZE = 180;
+export const OPTIFRAME_MAX_PAYLOAD = 8000;
+const HEADER_BITS = 72;
+const HEADER_VERSION = 2;
 const FINDER_SIZE = 9;
 const FINDER_OFFSET = 4;
 const LUMINANCE_LEVELS = [0, 85, 170, 255] as const;
@@ -102,19 +102,19 @@ export function encodeOptiFrame(payload: Uint8Array, sequence = 0, total = 1) {
     throw new Error('OptiFrame metadata is out of range.');
   }
 
-  // The protocol layout is exactly 64 header bits followed by payload+CRC
-  // bytes. Build those 8 header bytes directly, then read every two payload bits
-  // in-place while rasterizing. This removes the old ~32k-element bit-array
-  // allocation on every optical frame.
-  const header = new Uint8Array(8);
+  // Header v2 is 72 bits: magic16 + version4 + sequence16 + total16 +
+  // payloadLength16 + reserved4. The extra length bits unlock the larger
+  // 180×180 / 2-bit optical payload without sacrificing CRC protection.
+  const header = new Uint8Array(9);
   header[0] = MAGIC >>> 8;
   header[1] = MAGIC & 255;
   header[2] = (HEADER_VERSION << 4) | ((sequence >>> 12) & 0x0f);
   header[3] = (sequence >>> 4) & 255;
   header[4] = ((sequence & 0x0f) << 4) | ((total >>> 12) & 0x0f);
   header[5] = (total >>> 4) & 255;
-  header[6] = ((total & 0x0f) << 4) | ((payload.length >>> 8) & 0x0f);
-  header[7] = payload.length & 255;
+  header[6] = ((total & 0x0f) << 4) | ((payload.length >>> 12) & 0x0f);
+  header[7] = (payload.length >>> 4) & 255;
+  header[8] = (payload.length & 0x0f) << 4;
 
   const body = new Uint8Array(payload.length + 4);
   body.set(payload);
@@ -191,16 +191,16 @@ function quantize(v: number) {
 }
 
 function decodePackedFrame(packed: Uint8Array) {
-  if (packed.length < 8 + 4) return null;
+  if (packed.length < 9 + 4) return null;
 
   const magic = (packed[0] << 8) | packed[1];
   const version = packed[2] >>> 4;
   const sequence = ((packed[2] & 0x0f) << 12) | (packed[3] << 4) | (packed[4] >>> 4);
   const total = ((packed[4] & 0x0f) << 12) | (packed[5] << 4) | (packed[6] >>> 4);
-  const length = ((packed[6] & 0x0f) << 8) | packed[7];
+  const length = ((packed[6] & 0x0f) << 12) | (packed[7] << 4) | (packed[8] >>> 4);
   if (magic !== MAGIC || version !== HEADER_VERSION || total < 1 || length > OPTIFRAME_MAX_PAYLOAD) return null;
 
-  const payloadStart = 8;
+  const payloadStart = 9;
   const end = payloadStart + length + 4;
   if (end > packed.length) return null;
   const payload = packed.slice(payloadStart, payloadStart + length);
@@ -216,7 +216,7 @@ function decodePackedFrame(packed: Uint8Array) {
 
 function decodeAxisAlignedImage(image: ImageData) {
   if (image.width !== OPTIFRAME_SIZE || image.height !== OPTIFRAME_SIZE) return null;
-  const packed = new Uint8Array(8 + Math.ceil((capacityBits() + 7) / 8));
+  const packed = new Uint8Array(9 + Math.ceil((capacityBits() + 7) / 8));
   let cursorBits = 0;
   for (let r = 0; r < OPTIFRAME_SIZE; r++) {
     for (let col = 0; col < OPTIFRAME_SIZE; col++) {
@@ -497,7 +497,8 @@ function searchFinderNear(image: ImageData, previous: OptiFrameAnchor) {
 }
 
 function decodePerspectiveFromAnchors(image: ImageData, anchors: PerspectiveAnchorSet) {
-  const target: Array<[number, number]> = [[8, 8], [119, 8], [8, 119], [119, 119]];
+  const edge = OPTIFRAME_SIZE - 9;
+  const target: Array<[number, number]> = [[8, 8], [edge, 8], [8, edge], [edge, edge]];
   const homography = solveHomography(anchors.map(anchor => [anchor.x, anchor.y]), target);
   if (!homography) return null;
   const reverse = solveHomography(target, anchors.map(anchor => [anchor.x, anchor.y]));
