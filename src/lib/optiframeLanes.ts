@@ -79,9 +79,9 @@ export function createOptiLaneSurface(
 
   const layout = getOptiLaneLayout(laneCount);
   // Match the physical raster to the available display area. A single lane
-  // can use a much larger 768 px surface, while 2×/4× grids target ~3 px per
-  // protocol module so the full grid still fits a typical 760 px viewport.
-  const renderScale = laneCount === 1 ? 6 : 3;
+  // uses ~4 px/module (720 px), while 2×/4× grids use ~3 px/module so a
+  // 4-lane 180px protocol grid reaches a native 1080×1080 sender surface.
+  const renderScale = laneCount === 1 ? 4 : 3;
   const laneRenderSize = OPTIFRAME_SIZE * renderScale;
   const canvas = document.createElement('canvas');
   canvas.width = layout.columns * laneRenderSize;
