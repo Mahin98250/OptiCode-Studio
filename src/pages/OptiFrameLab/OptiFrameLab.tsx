@@ -594,6 +594,7 @@ export function OptiFrameLab() {
 
     captureOriginRef.current = { x: 0, y: 0 };
     let image: ImageData;
+    let directTrackedCrop: { image: ImageData; offsetX: number; offsetY: number } | null = null;
 
     const captureFullFrame = () => {
       if (capture.width !== width) capture.width = width;
