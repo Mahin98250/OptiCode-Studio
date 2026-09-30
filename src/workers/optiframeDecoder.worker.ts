@@ -5,6 +5,7 @@ type Request = {
   width: number;
   height: number;
   buffer: ArrayBuffer;
+  previousAnchors?: OptiFramePerspectiveDiagnostics['anchors'] | null;
 };
 
 type Response = {
@@ -26,10 +27,10 @@ const scope = self as unknown as {
 };
 
 scope.onmessage = (event) => {
-  const { id, width, height, buffer } = event.data;
+  const { id, width, height, buffer, previousAnchors = null } = event.data;
   try {
     const image = new ImageData(new Uint8ClampedArray(buffer), width, height);
-    const result = decodeOptiFramePerspective(image);
+    const result = decodeOptiFramePerspective(image, previousAnchors);
     if (!result) {
       scope.postMessage({ id, ok: false });
       return;
