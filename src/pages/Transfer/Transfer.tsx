@@ -321,6 +321,7 @@ export function Transfer() {
   // capture sequence or an older frame can visibly pull the lock backwards.
   const opticalDecodeSequenceRef=useRef(0);
   const opticalLatestGeometrySequenceRef=useRef(0);
+  const opticalAssociationBreakStreakRef=useRef(0);
   // Adaptive decode concurrency prevents a slow phone from filling every
   // worker with stale frames, while high-end devices can ramp up to the full
   // worker pool once actual decode latency proves they can sustain it.
@@ -1368,6 +1369,39 @@ export function Transfer() {
         .sort((a,b)=>previous ? b.score-a.score : (b.box.width*b.box.height)-(a.box.width*a.box.height));
       const selected=ranked[0].box;
       const associationScore=previous?ranked[0].score:1;
+
+      // Lock hysteresis: when several QRs are visible, do not jump the visual
+      // lock to a distant candidate on the first bad association. Hold the last
+      // confirmed track for two detector cycles, then allow a deliberate switch
+      // if the old target really disappeared or the camera moved elsewhere.
+      if(previous?.confirmed && associationScore<.24){
+        opticalAssociationBreakStreakRef.current+=1;
+        if(opticalAssociationBreakStreakRef.current<3){
+          const age=Math.max(0,now-previous.lastSeenAt);
+          const keep={
+            x:Math.max(0,Math.min(frameWidth-previous.box.width,predicted.x)),
+            y:Math.max(0,Math.min(frameHeight-previous.box.height,predicted.y)),
+            width:Math.min(frameWidth,Math.max(4,predicted.width)),
+            height:Math.min(frameHeight,Math.max(4,predicted.height)),
+          };
+          opticalTrackRef.current={...previous,box:keep,vx:previous.vx*.88,vy:previous.vy*.88,vw:previous.vw*.88,vh:previous.vh*.88,confidence:Math.max(0,previous.confidence-.025),misses:previous.misses+1};
+          setOpticalTrack({confidence:Math.max(0,previous.confidence-.025),predicted:true,ageMs:Math.round(age)});
+          setRectFromBox(keep);
+          setOpticalGuideDiagnostics({
+            framing:'good',
+            distance:'good',
+            lighting:brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
+            stability:'moving',
+            geometry:'good',
+            focus:'unknown',
+          });
+          applyMessage('Maintaining QR lock','Another QR was briefly detected, but the tracker is preserving the confirmed target instead of jumping to it.','steady',Math.round(70+previous.confidence*20));
+          return;
+        }
+      }else{
+        opticalAssociationBreakStreakRef.current=0;
+      }
+
       const primary=selected;
       const predictedForFilter=previous ? predicted : primary;
       // Adaptive alpha-beta filtering: alpha responds to movement and
@@ -1464,6 +1498,7 @@ export function Transfer() {
           geometryPenalty-cropPenalty-lightingPenalty
         );
 
+      opticalAssociationBreakStreakRef.current=0;
       const next:OpticalTrack={
         box:smoothed,
         vx:measuredVx,
@@ -2121,6 +2156,7 @@ export function Transfer() {
     noDetectionDecodeCountRef.current=0;
     opticalDecodeSequenceRef.current=0;
     opticalLatestGeometrySequenceRef.current=0;
+    opticalAssociationBreakStreakRef.current=0;
     decodeParallelismRef.current=1;
     decodePerfWindowRef.current={samples:0,totalMs:0};
     nativeCallsRef.current=0;
