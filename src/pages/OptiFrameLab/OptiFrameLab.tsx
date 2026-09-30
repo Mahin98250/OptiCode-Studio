@@ -131,11 +131,14 @@ export function OptiFrameLab() {
   const seenSequenceRef = useRef(new Set<number>());
   const trackedAnchorsRef = useRef<OptiFramePerspectiveDiagnostics['anchors'] | null>(null);
   const trackedLaneAnchorsRef = useRef(new Map<number, OptiFramePerspectiveDiagnostics['anchors']>());
+  const opticalCaptureSequenceRef = useRef(0);
+  const latestGeometrySequenceRef = useRef(0);
+  const latestLaneGeometrySequenceRef = useRef(new Map<number, number>());
   const framesSinceFullScanRef = useRef(0);
   const acquisitionFailureRef = useRef(0);
   const acquisitionTestRef = useRef(false);
   const acquisitionTestMetricsRef = useRef(emptyAcquisitionTest());
-  const reacquireEveryFrames = 12;
+  const reacquireEveryFrames = 60;
   const receivedFileUrlRef = useRef('');
   const streamFrameCacheRef = useRef(createOptiFrameCanvasCache(96));
   const adaptiveTransmissionRef = useRef(createAdaptiveTransmission(80));
@@ -552,6 +555,7 @@ export function OptiFrameLab() {
   }
 
   async function decodeCameraFrame() {
+    const captureSequence = ++opticalCaptureSequenceRef.current;
     const video = videoRef.current;
     if (!video || video.readyState < 2 || !streamRef.current) return;
 
@@ -795,7 +799,11 @@ export function OptiFrameLab() {
           x: anchor.x + entry.lane.offsetX,
           y: anchor.y + entry.lane.offsetY,
         })) as OptiFramePerspectiveDiagnostics['anchors'];
-        trackedLaneAnchorsRef.current.set(entry.lane.lane, absoluteAnchors);
+        const latestLaneSequence = latestLaneGeometrySequenceRef.current.get(entry.lane.lane) ?? 0;
+        if (captureSequence >= latestLaneSequence) {
+          latestLaneGeometrySequenceRef.current.set(entry.lane.lane, captureSequence);
+          trackedLaneAnchorsRef.current.set(entry.lane.lane, absoluteAnchors);
+        }
       }
 
       const elapsedFromStart = cameraStats.startedAt ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000) : 0;
@@ -869,9 +877,11 @@ export function OptiFrameLab() {
         x: anchor.x + cropOffset.x,
         y: anchor.y + cropOffset.y,
       })) as OptiFramePerspectiveDiagnostics['anchors'];
-      trackedAnchorsRef.current = absoluteAnchors;
-      trackedLaneAnchorsRef.current.set(0, absoluteAnchors);
-      setAcquisition({
+      if (captureSequence >= latestGeometrySequenceRef.current) {
+        latestGeometrySequenceRef.current = captureSequence;
+        trackedAnchorsRef.current = absoluteAnchors;
+        trackedLaneAnchorsRef.current.set(0, absoluteAnchors);
+        setAcquisition({
         stage: 'ready',
         anchors: absoluteAnchors,
         confidence: result.diagnostics.confidence,
@@ -882,6 +892,7 @@ export function OptiFrameLab() {
         sampleHeight: image.height,
         elapsedMs: result.diagnostics.decodeMs,
       });
+      }
     } else {
       framesSinceFullScanRef.current += 1;
       acquisitionFailureRef.current += 1;
@@ -982,6 +993,9 @@ export function OptiFrameLab() {
     seenSequenceRef.current.clear();
     trackedAnchorsRef.current = null;
     trackedLaneAnchorsRef.current.clear();
+    latestGeometrySequenceRef.current = 0;
+    latestLaneGeometrySequenceRef.current.clear();
+    opticalCaptureSequenceRef.current = 0;
     framesSinceFullScanRef.current = 0;
     setReceiver({ total: 0, received: 0, bytes: 0, missing: [], complete: false });
     setCameraDecoded('');
@@ -1046,7 +1060,10 @@ export function OptiFrameLab() {
         if (!streamRef.current) return;
         const maxInFlight = laneCount === 1
           ? Math.min(3, Math.max(1, decodePoolRef.current.capacity))
-          : Math.min(2, Math.max(1, decodePoolRef.current.capacity));
+          : Math.min(
+              2,
+              Math.max(1, Math.floor((decodePoolRef.current.capacity || 1) / laneCount)),
+            );
         if (opticalDecodeInFlightRef.current < maxInFlight) {
           opticalDecodeInFlightRef.current += 1;
           void decodeCameraFrame().finally(() => {
