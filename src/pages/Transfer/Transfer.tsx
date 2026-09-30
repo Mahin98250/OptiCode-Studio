@@ -85,6 +85,7 @@ type OpticalTrack = {
   lastSeenAt:number;
   confidence:number;
   misses:number;
+  confirmed:boolean;
 };
 
 function getDisplayLaneCount() {
@@ -191,6 +192,8 @@ export function Transfer() {
   const opticalTrackRef=useRef<OpticalTrack|null>(null);
   const lastGuideBoxRef=useRef<{x:number;y:number;width:number;height:number}|null>(null);
   const guideStableCountRef=useRef(0);
+  const guideDetectionStreakRef=useRef(0);
+  const guideMissStreakRef=useRef(0);
   const decodeMaxDimensionRef=useRef(1120);
   const noDetectionDecodeCountRef=useRef(0);
   const feedbackVideoRef=useRef<HTMLVideoElement>(null);
@@ -1182,7 +1185,10 @@ export function Transfer() {
         confidence:previous ? previous.confidence*.55+currentConfidence*.45 : currentConfidence,
         misses:0,
       };
-      opticalTrackRef.current=next;
+      guideDetectionStreakRef.current=Math.min(8,guideDetectionStreakRef.current+1);
+      guideMissStreakRef.current=0;
+      const confirmed=guideDetectionStreakRef.current>=3;
+      opticalTrackRef.current={...next,confirmed};
       setOpticalTrack({confidence:next.confidence,predicted:false,ageMs:0});
       lastGuideBoxRef.current=primary;
       if(movement<.018) guideStableCountRef.current+=1;
@@ -1199,6 +1205,10 @@ export function Transfer() {
 
       // Instruction priority: environmental failure → geometry → focus →
       // motion → locked state. This avoids contradictory coaching.
+      if(!confirmed){
+        applyMessage('QR detected — locking on','A real QR was detected. Hold the phone steady for a moment while the optical guide confirms its position.','steady',35+next.confidence*20);
+        return;
+      }
       if(lighting==='dark'){
         applyMessage('Too dark — brighten the sender screen','Increase the sender brightness or ambient light. The QR is visible, but contrast is marginal for high-rate reading.','light',54+next.confidence*12);
         return;
@@ -1246,12 +1256,15 @@ export function Transfer() {
       return;
     }
 
-    // Short detector misses are expected on real camera streams. Keep predicting
-    // the last QR position for up to 900 ms instead of flashing the box off.
-    if(current){
+    // A guide is only allowed to predict through a very short detector gap
+    // after a QR has been independently confirmed. This prevents the coaching
+    // system from inventing a QR when the camera is pointed at an empty scene.
+    guideMissStreakRef.current+=1;
+    const currentConfirmed=current?.confirmed===true;
+    if(current && currentConfirmed && guideMissStreakRef.current<=2){
       const age=now-current.lastSeenAt;
-      if(age<=900 && current.confidence>.24){
-        const dt=Math.min(180,Math.max(0,age));
+      if(age<=220){
+        const dt=Math.min(140,Math.max(0,age));
         const predicted={
           x:current.box.x+current.vx*dt,
           y:current.box.y+current.vy*dt,
@@ -1264,8 +1277,8 @@ export function Transfer() {
           width:Math.min(frameWidth,predicted.width),
           height:Math.min(frameHeight,predicted.height),
         };
-        const decayed=Math.max(.22,current.confidence-Math.min(.22,age/4500));
-        opticalTrackRef.current={...current,box:clamped,vx:current.vx*.84,vy:current.vy*.84,vw:current.vw*.84,vh:current.vh*.84,confidence:decayed,misses:current.misses+1};
+        const decayed=Math.max(0,current.confidence-Math.min(.30,age/900));
+        opticalTrackRef.current={...current,box:clamped,vx:current.vx*.70,vy:current.vy*.70,vw:current.vw*.70,vh:current.vh*.70,confidence:decayed,misses:current.misses+1};
         setOpticalTrack({confidence:decayed,predicted:true,ageMs:Math.round(age)});
         setRectFromBox(clamped);
 
@@ -1273,45 +1286,28 @@ export function Transfer() {
         const cx=(clamped.x+clamped.width/2)/Math.max(1,frameWidth);
         const cy=(clamped.y+clamped.height/2)/Math.max(1,frameHeight);
         const centered=Math.abs(cx-.5)<.12 && Math.abs(cy-.5)<.12;
-        const distance=size<.24?'too-far':size>.76?'too-close':'good';
-        const lighting=brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good';
-        const stability=current.misses>=3?'moving':'steady';
-        setOpticalGuideDiagnostics({framing:centered?'good':'off',distance,lighting,stability});
-
-        if(lighting==='dark'){
-          applyMessage('Too dark — brighten the sender screen','The last QR lock is still being tracked, but lighting is too weak for dependable recovery.','light',34+decayed*20);
-        }else if(lighting==='glare'){
-          applyMessage('Reduce glare','The last QR lock is being predicted through a missed frame. Tilt away from the strongest reflection.','light',36+decayed*18);
-        }else if(distance==='too-far'){
-          applyMessage('Move closer','The tracker still sees where the QR was, but the code is getting too small. Bring it closer without cutting off the edges.','closer',36+decayed*16);
-        }else if(distance==='too-close'){
-          applyMessage('Move slightly farther away','Keep the entire QR visible with a clear margin around it.','farther',40+decayed*16);
-        }else if(!centered){
-          applyMessage('Re-center the QR','The tracker is following it, but the lock is drifting toward the edge of the camera view.','center',46+decayed*18);
-        }else{
-          applyMessage('Tracking through a missed frame','Keep the phone steady. The decoder is reacquiring the QR without dropping the visual lock.','steady',52+decayed*30);
-        }
+        setOpticalGuideDiagnostics({
+          framing:centered?'good':'off',
+          distance:size<.24?'too-far':size>.76?'too-close':'good',
+          lighting:brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
+          stability:'moving',
+        });
+        applyMessage('Reacquiring QR…','The last confirmed QR was briefly lost. Hold steady; the decoder is checking the same region again.','steady',Math.round(42+decayed*28));
         return;
       }
     }
 
+    // No confirmed QR is currently visible. Never infer distance, direction,
+    // lighting, or framing from the absence of a detection.
+    guideDetectionStreakRef.current=0;
+    guideMissStreakRef.current=Math.min(8,guideMissStreakRef.current);
     opticalTrackRef.current=null;
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideRect(null);
-    const dark=brightness<38;
-    const glare=clippedHighlights>.18 && contrast<42;
-    setOpticalGuideDiagnostics({framing:'searching',distance:'unknown',lighting:dark?'dark':glare?'glare':'unknown',stability:'moving'});
-    const misses=noDetectionDecodeCountRef.current;
-    if(dark){
-      applyMessage('Too dark — brighten the sender screen','Increase sender brightness and aim the camera at the full display.','light',18);
-    }else if(glare){
-      applyMessage('Reduce glare','Tilt the phone or display slightly until the white QR area is evenly lit.','light',24);
-    }else{
-      const searching=misses<4;
-      applyMessage(searching?'Looking for the QR…':'Move closer and fill the guide',searching
-        ?'Point the camera at the sender display. The tracker will lock onto the code as soon as it resolves.'
-        :'The camera is not resolving the code yet. Bring the phone closer while keeping the full QR visible.',searching?'searching':'closer',searching?10:Math.max(22,Math.min(46,misses*4)));
-    }
+    setOpticalGuideDiagnostics({framing:'searching',distance:'unknown',lighting:'unknown',stability:'moving'});
+    applyMessage('No QR code detected','No valid QR code has been confirmed in the camera view. Point the camera at the sender screen or QR code.','searching',0);
+  };
+
   }
 
   function estimateOpticalFrameMetrics(image:ImageData):OpticalFrameMetrics{
@@ -1872,7 +1868,9 @@ export function Transfer() {
                   ? 'border-emerald-300 shadow-[0_0_32px_rgba(52,211,153,.28)]'
                   : opticalGuide.tone==='closer'||opticalGuide.tone==='farther'
                     ? 'border-amber-300 shadow-[0_0_32px_rgba(251,191,36,.22)]'
-                    : 'border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]'}`}>
+                    : opticalGuide.tone==='searching'
+                      ? 'border-white/20 border-dashed shadow-[0_0_0_9999px_rgba(0,0,0,.12)]'
+                      : 'border-cyan-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,.18)]'}`}>
                   <span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/75 px-3 py-1.5 text-[10px] font-black text-white">
                     {opticalGuide.title}
                   </span>
