@@ -672,16 +672,18 @@ export function OptiFrameLab() {
     });
 
     if (latest.complete) {
-      const rebuilt = await opticalFountainDecoderRef.current.reconstruct();
+      // Build the final Blob directly from paged solved storage. This avoids a
+      // second full-size Uint8Array allocation at completion.
+      const rebuilt = await opticalFountainDecoderRef.current.reconstructBlob();
       if (rebuilt) {
         if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
-        const url = URL.createObjectURL(new Blob([rebuilt.bytes as unknown as BlobPart], { type: rebuilt.mime }));
+        const url = URL.createObjectURL(rebuilt.blob);
         receivedFileUrlRef.current = url;
         setReceivedFile({
           name: rebuilt.name,
           type: rebuilt.mime,
           size: rebuilt.size,
-          data: rebuilt.bytes,
+          data: new Uint8Array(0),
         });
         setReceivedFileUrl(url);
         setCameraDecoded('');
