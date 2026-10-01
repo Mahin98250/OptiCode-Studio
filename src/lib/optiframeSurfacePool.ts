@@ -110,7 +110,7 @@ export class OptiFrameSurfacePool {
     transferPayloadOwnership = false,
   ) {
     if (this.capacity === 0 || payloads.length !== laneCount) return false;
-    if (this.ready.has(key) || [...this.pending.values()].some(job => job.key === key) || this.queue.some(job => job.key === key)) {
+    if (this.ready.has(key) || [...this.pending.values()].some(pending => pending.job.key === key) || this.queue.some(job => job.key === key)) {
       return false;
     }
 
@@ -143,7 +143,7 @@ export class OptiFrameSurfacePool {
 
   has(key: string) {
     if (this.ready.has(key)) return true;
-    if ([...this.pending.values()].some(job => job.key === key)) return true;
+    if ([...this.pending.values()].some(pending => pending.job.key === key)) return true;
     return this.queue.some(job => job.key === key);
   }
 
