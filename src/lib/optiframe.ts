@@ -823,6 +823,7 @@ function decodePerspectiveFromAnchors(
       cursorBits += 1;
     }
   }
+  return decodePackedFrameWithConfig(packed, expectedVersion, maxPayload);
 }
 
 function solveHomography(
