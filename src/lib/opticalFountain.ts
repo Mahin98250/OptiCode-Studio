@@ -641,6 +641,16 @@ export class OpticalFountainDecoder {
       if (this.activeSession && this.activeSession !== frame.session) {
         return { ...this.snapshot(false), metaConflict: true };
       }
+      // A receiver may legitimately discover data before metadata. Once a
+      // session geometry has been established, do not let a later same-session
+      // metadata packet silently rewrite block sizing underneath stored
+      // equations or solved pages.
+      if (
+        this.totalBlocks > 0 &&
+        (this.totalBlocks !== frame.totalBlocks || this.blockBytes !== frame.blockBytes)
+      ) {
+        return { ...this.snapshot(false), metaConflict: true };
+      }
       this.activeSession = frame.session;
       this.meta = frame;
       this.totalBlocks = frame.totalBlocks;
