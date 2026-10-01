@@ -26,7 +26,7 @@ const scope = self as unknown as {
 };
 
 function getRenderScale(laneCount: OptiLaneCount) {
-  return laneCount === 1 ? 4 : laneCount === 2 || laneCount === 4 ? 3 : 2;
+  return laneCount === 1 ? 5 : laneCount === 2 || laneCount === 4 ? 3 : 2;
 }
 
 scope.onmessage = async (event) => {
