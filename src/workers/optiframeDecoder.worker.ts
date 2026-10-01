@@ -36,7 +36,10 @@ scope.onmessage = (event) => {
       return;
     }
 
-    const payloadBuffer = result.frame.payload.slice().buffer;
+    const payload = result.frame.payload;
+    const payloadBuffer = payload.byteOffset === 0 && payload.byteLength === payload.buffer.byteLength
+      ? payload.buffer
+      : payload.slice().buffer;
     scope.postMessage({
       id,
       ok: true,
