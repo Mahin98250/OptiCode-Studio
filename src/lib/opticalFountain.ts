@@ -29,6 +29,7 @@ type MetaFrame = {
   totalBlocks: number;
   blockBytes: number;
   hash: string;
+  hashReady: Promise<string>;
   name: string;
   mime: string;
 };
@@ -404,6 +405,7 @@ export async function createOpticalFountainTransfer(
     digestHex = hex(digest);
     return digest;
   });
+  const hashReady = digestReady.then(digest => hex(digest));
   const session = randomSession();
   const sessionBytes = unhex(session);
   const sessionSeed = hashSession(session);
@@ -570,6 +572,7 @@ export async function createOpticalFountainTransfer(
     get hash() {
       return digestHex;
     },
+    hashReady,
     name,
     mime,
     size: file.size,
