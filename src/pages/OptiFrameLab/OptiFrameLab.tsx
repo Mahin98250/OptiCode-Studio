@@ -501,11 +501,11 @@ export function OptiFrameLab() {
     setCameraOn(false);
   }
 
-  async function selectTransferFile(file?: File) {
+  async function selectTransferFile(file?: File, densityOverride: 2 | 4 = opticalDensity) {
     if (!file) return;
     try {
       setStatus('Preparing ' + file.name + ' for binary optical fountain transfer…');
-      const plan = await createOpticalFountainTransfer(file, { densityBits: opticalDensity });
+      const plan = await createOpticalFountainTransfer(file, { densityBits: densityOverride });
       setTransferFile(file);
       setTransferData(null);
       setOpticalFountainPlan(plan);
@@ -1416,7 +1416,11 @@ export function OptiFrameLab() {
              <button onClick={() => setOpticalDisplayMode(true)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]"><Maximize2 size={14}/> Full screen</button>
             <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]">
               Codec
-              <select value={opticalDensity} onChange={event => setOpticalDensity(Number(event.target.value) === 4 ? 4 : 2)} className="bg-transparent outline-none">
+              <select value={opticalDensity} onChange={event => {
+                const next = Number(event.target.value) === 4 ? 4 : 2;
+                setOpticalDensity(next);
+                if (transferFile) void selectTransferFile(transferFile, next);
+              }} className="bg-transparent outline-none">
                 <option value={2}>2-bit · robust</option>
                 <option value={4}>4-bit · turbo</option>
               </select>
