@@ -286,13 +286,13 @@ export function OptiFrameLab() {
     senderSurfaceCacheRef.current.clear();
     surfacePoolRef.current.clear();
 
-    const getPayloads = (group: number) => opticalFountainPlan
-      ? Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount))
+    const getPayloads = async (group: number) => opticalFountainPlan
+      ? Promise.all(Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount)))
       : Array.from({ length: laneCount }, (_, lane) =>
           streamPayload[(group * laneCount + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
         );
 
-    const queueWorkerPrefetch = (group: number) => {
+    const queueWorkerPrefetch = async (group: number) => {
       const window = Math.min(4, Math.max(1, streamGroupCount));
       for (let offset = 1; offset <= window; offset += 1) {
         const nextGroup = group + offset;
@@ -302,18 +302,23 @@ export function OptiFrameLab() {
           opticalFountainPlan ? 'fountain' : 'frames',
           nextGroup,
         ].join(':');
+        const payloads = await getPayloads(nextGroup);
         surfacePoolRef.current.request(
           key,
           nextGroup,
           streamGroupCount,
           laneCount,
-          getPayloads(nextGroup),
+          payloads,
           opticalFountainPlan?.densityBits ?? opticalDensity,
         );
       }
     };
 
-    const drawDirect = (group: number) => {
+    let drawInFlight = false;
+    const drawDirect = async (group: number) => {
+      if (drawInFlight) return;
+      drawInFlight = true;
+      try {
       const key = [
         opticalFountainPlan?.session ?? 'chunk',
         laneCount,
@@ -324,7 +329,7 @@ export function OptiFrameLab() {
       let surface = senderSurfaceCacheRef.current.get(key);
       let workerBitmap = surfacePoolRef.current.take(key);
       if (!surface && !workerBitmap) {
-        const payloads = getPayloads(group);
+        const payloads = await getPayloads(group);
 
         try {
           // The direct sender already maintains a rolling group cache.
@@ -364,14 +369,15 @@ export function OptiFrameLab() {
       paint(streamCanvasRef.current);
       paint(presentationCanvasRef.current);
       workerBitmap?.close();
-      queueWorkerPrefetch(group);
+      void queueWorkerPrefetch(group);
 
-      // Keep the control UI current at a human-readable cadence rather than
-      // re-rendering React at optical-frame frequency.
       const now = performance.now();
       if (now - senderLastPaintAtRef.current >= 500) {
         senderLastPaintAtRef.current = now;
         setStreamIndex(group * laneCount);
+      }
+      } finally {
+        drawInFlight = false;
       }
     };
 
@@ -381,12 +387,14 @@ export function OptiFrameLab() {
         return;
       }
       if (
-        senderCadenceAtRef.current === 0 ||
-        now - senderCadenceAtRef.current >= streamIntervalMs
+        !drawInFlight &&
+        (senderCadenceAtRef.current === 0 ||
+          now - senderCadenceAtRef.current >= streamIntervalMs)
       ) {
-        drawDirect(senderGroupRef.current);
+        const group = senderGroupRef.current;
         senderGroupRef.current += 1;
         senderCadenceAtRef.current = now;
+        void drawDirect(group);
       }
       senderRafRef.current = window.requestAnimationFrame(tick);
     };
@@ -394,10 +402,14 @@ export function OptiFrameLab() {
     senderCadenceAtRef.current = 0;
     senderLastPaintAtRef.current = performance.now();
     senderRafRef.current = window.requestAnimationFrame((now) => {
-      if (senderCadenceAtRef.current === 0 || now - senderCadenceAtRef.current >= streamIntervalMs) {
-        drawDirect(senderGroupRef.current);
+      if (
+        !drawInFlight &&
+        (senderCadenceAtRef.current === 0 || now - senderCadenceAtRef.current >= streamIntervalMs)
+      ) {
+        const group = senderGroupRef.current;
         senderGroupRef.current += 1;
         senderCadenceAtRef.current = now;
+        void drawDirect(group);
       }
       senderRafRef.current = window.requestAnimationFrame(tick);
     });
@@ -409,28 +421,44 @@ export function OptiFrameLab() {
       }
       senderLastPaintAtRef.current = 0;
       senderSurfaceCacheRef.current.clear();
+      setStreamSurface(null);
     };
   }, [streamPlaying, streamIntervalMs, laneCount, streamGroupCount, streamPayload, opticalFountainPlan, opticalDensity]);
 
-  const streamSurface = useMemo(() => {
-    try {
-      const group = Math.floor(streamIndex / laneCount);
-      const payloads = opticalFountainPlan
-        ? Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount))
-        : Array.from({ length: laneCount }, (_, lane) =>
-            streamPayload[(streamIndex + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
-          );
-      return createOptiLaneSurface(
-        payloads,
-        group,
-        streamGroupCount,
-        laneCount,
-        opticalFountainPlan ? undefined : streamFrameCacheRef.current,
-        opticalFountainPlan?.densityBits ?? opticalDensity,
-      ).canvas;
-    } catch {
-      return null;
-    }
+  const [streamSurface, setStreamSurface] = useState<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const group = Math.floor(streamIndex / laneCount);
+    const loadSurface = async () => {
+      try {
+        const payloads = opticalFountainPlan
+          ? await Promise.all(
+              Array.from(
+                { length: laneCount },
+                (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount),
+              ),
+            )
+          : Array.from({ length: laneCount }, (_, lane) =>
+              streamPayload[(group * laneCount + lane) % Math.max(1, streamPayload.length)] ?? new Uint8Array(),
+            );
+        const surface = createOptiLaneSurface(
+          payloads,
+          group,
+          streamGroupCount,
+          laneCount,
+          opticalFountainPlan ? undefined : streamFrameCacheRef.current,
+          opticalFountainPlan?.densityBits ?? opticalDensity,
+        ).canvas;
+        if (!cancelled) setStreamSurface(surface);
+      } catch {
+        if (!cancelled) setStreamSurface(null);
+      }
+    };
+    void loadSurface();
+    return () => {
+      cancelled = true;
+    };
   }, [streamPayload, streamIndex, laneCount, streamGroupCount, opticalFountainPlan, opticalDensity]);
 
   useEffect(() => {
@@ -572,7 +600,7 @@ export function OptiFrameLab() {
         plan.totalBlocks.toLocaleString() +
         ' source blocks · ' +
         plan.blockBytes.toLocaleString() +
-        ' bytes/optical frame payload · binary ' + plan.densityBits + '-bit OptiFrame fountain enabled.',
+        ' bytes/optical frame payload · binary ' + plan.densityBits + '-bit OptiFrame fountain enabled · file-backed source blocks.',
       );
     } catch (error) {
       setTransferFile(null);
@@ -640,7 +668,7 @@ export function OptiFrameLab() {
       const rebuilt = await opticalFountainDecoderRef.current.reconstruct();
       if (rebuilt) {
         if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
-        const url = URL.createObjectURL(new Blob([rebuilt.bytes.buffer as ArrayBuffer], { type: rebuilt.mime }));
+        const url = URL.createObjectURL(new Blob([rebuilt.bytes], { type: rebuilt.mime }));
         receivedFileUrlRef.current = url;
         setReceivedFile({
           name: rebuilt.name,
