@@ -105,10 +105,10 @@ export function createOptiLaneSurface(
   const frames: OptiFrame[] = [];
   for (let lane = 0; lane < laneCount; lane += 1) {
     const sequence = getOptiLaneSequence(baseSequence, lane, total);
-    const canvas = densityBits === 4
-      ? encodeOptiFrameDense4(payloads[lane], sequence, total).canvas
-      : frameCache
-        ? frameCache.get(payloads[lane], sequence, total, densityBits)
+    const canvas = frameCache
+      ? frameCache.get(payloads[lane], sequence, total, densityBits)
+      : densityBits === 4
+        ? encodeOptiFrameDense4(payloads[lane], sequence, total).canvas
         : encodeOptiFrame(payloads[lane], sequence, total).canvas;
     frames.push({
       version: densityBits === 4 ? 3 : 2,
