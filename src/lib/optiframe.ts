@@ -914,14 +914,17 @@ function solveHomography(
 }
 
 function estimateCalibration(image: ImageData, anchors: ReadonlyArray<OptiFrameAnchor>) {
-  const values: { dark: number; light: number }[] = [];
+  let darkSum = 0;
+  let darkCount = 0;
+  let lightSum = 0;
+  let lightCount = 0;
+
   for (const anchor of anchors) {
     const { x: cx, y: cy, scale, angle } = anchor;
     const radians = angle * Math.PI / 180;
     const cos = Math.cos(radians);
     const sin = Math.sin(radians);
-    const ring: number[] = [];
-    const center: number[] = [];
+
     for (let r = 0; r < FINDER_SIZE; r++) {
       for (let c = 0; c < FINDER_SIZE; c++) {
         const dx = (c - 4) * scale;
@@ -929,18 +932,19 @@ function estimateCalibration(image: ImageData, anchors: ReadonlyArray<OptiFrameA
         const x = cx + dx * cos - dy * sin;
         const y = cy + dx * sin + dy * cos;
         const value = bilinear(image, x, y);
-        if (finderBit(r, c)) center.push(value);
-        else ring.push(value);
+        if (finderBit(r, c)) {
+          lightSum += value;
+          lightCount += 1;
+        } else {
+          darkSum += value;
+          darkCount += 1;
+        }
       }
     }
-    values.push({
-      dark: ring.reduce((sum, v) => sum + v, 0) / Math.max(1, ring.length),
-      light: center.reduce((sum, v) => sum + v, 0) / Math.max(1, center.length),
-    });
   }
 
-  const dark = values.reduce((sum, value) => sum + value.dark, 0) / values.length;
-  const light = values.reduce((sum, value) => sum + value.light, 0) / values.length;
+  const dark = darkSum / Math.max(1, darkCount);
+  const light = lightSum / Math.max(1, lightCount);
   if (light - dark < 35) return null;
   return { dark, light };
 }
