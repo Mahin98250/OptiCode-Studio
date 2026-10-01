@@ -663,7 +663,7 @@ async function optiFrameMultiLaneRoundTrip() {
     assert(ctx, 'Multi-lane fixture canvas context unavailable.');
     const image = ctx.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
     const lanes = cropOptiLaneGrid(image, laneCount);
-    const expectedLaneSize = OPTIFRAME_SIZE * (laneCount === 1 ? 4 : laneCount === 2 || laneCount === 4 ? 3 : 2);
+    const expectedLaneSize = OPTIFRAME_SIZE * (laneCount === 1 ? 5 : laneCount === 2 || laneCount === 4 ? 3 : 2);
     assert(lanes.length === laneCount, 'Expected ' + laneCount + ' cropped lanes, got ' + lanes.length + '.');
     assert(lanes.every(lane => lane.image.width === expectedLaneSize && lane.image.height === expectedLaneSize), 'Multi-lane crop did not preserve the physical lane raster.');
 
