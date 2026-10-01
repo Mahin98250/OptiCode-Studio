@@ -801,7 +801,7 @@ export class OpticalFountainDecoder {
 
       const pageStart = firstBlock * this.blockBytes;
       const pageBytes = Math.min(page.byteLength, Math.max(0, this.meta.size - pageStart));
-      if (pageBytes > 0) parts.push(page.subarray(0, pageBytes));
+      if (pageBytes > 0) parts.push(page.subarray(0, pageBytes) as unknown as BlobPart);
     }
 
     const blob = new Blob(parts, { type: this.meta.mime });
