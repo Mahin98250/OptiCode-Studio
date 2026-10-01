@@ -1375,10 +1375,19 @@ export function OptiFrameLab() {
            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3">
              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                <div><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Parallel optical lanes</p><p className="mt-1 text-xs text-[var(--text-muted)]">More lanes increase ideal bandwidth, but each tile gets smaller. Auto selects a display-size starting profile.</p></div>
-               <button onClick={() => { const next = recommendOptiLaneCount(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1); setLaneCount(next); setStatus('Auto lane profile selected: ' + next + '×.'); }} className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[10px] font-black text-cyan-200">Auto</button>
+               <button onClick={() => {
+                 const physicalDevice = navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches === true;
+                 const next = physicalDevice ? 1 : recommendOptiLaneCount(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
+                 setLaneCount(next);
+                 setStatus(physicalDevice ? 'Physical profile selected: 1× large optical frame.' : 'Auto lane profile selected: ' + next + '×.');
+               }} className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[10px] font-black text-cyan-200">Auto</button>
              </div>
              <div className="mt-3 flex flex-wrap gap-1 rounded-full border border-[var(--border)] p-1">{([1, 2, 4, 6, 9, 12, 16] as OptiLaneCount[]).map(count => <button key={count} onClick={() => setLaneCount(count)} className={laneCount === count ? 'rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950' : 'rounded-full px-3 py-1.5 text-[10px] font-black text-[var(--text-muted)]'}>{count}×</button>)}</div>
            </div>
+          <div className="mb-4 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-3">
+            <p className="text-[10px] font-black uppercase tracking-[.14em] text-emerald-200">Physical camera preset</p>
+            <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">For phone/tablet testing, keep <b className="text-[var(--text)]">1×</b> so the receiver gets one large OptiFrame. Multi-lane modes are for larger displays after basic acquisition is proven.</p>
+          </div>
           <div className="mt-5 grid place-items-center rounded-[26px] bg-white p-4">
             {streamSurface ? (
               <canvas
