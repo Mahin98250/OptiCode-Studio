@@ -976,6 +976,24 @@ async function opticalFountainLargeDense4StressDiagnostic() {
   );
 }
 
+async function optiFrameCanvasCacheDiagnostic() {
+  const cache = createOptiFrameCanvasCache(4);
+  const a = makeBytes(Math.min(512, getOptiFrameCapacity()), 17);
+  const b = makeBytes(Math.min(512, getOptiFrameCapacity()), 29);
+
+  const first = cache.get(a, 7, 40, 2);
+  const second = cache.get(a, 7, 40, 2);
+  assert(first === second, 'OptiFrame canvas cache missed an identity-stable payload.');
+
+  const different = cache.get(b, 7, 40, 2);
+  assert(different !== first, 'OptiFrame canvas cache conflated distinct payload identities.');
+
+  const dense4 = cache.get(a, 7, 40, 4);
+  assert(dense4 !== first, 'OptiFrame canvas cache ignored density.');
+
+  return 'identity-safe 2-bit hit · distinct payload isolation · density-separated cache keys verified';
+}
+
 async function adaptiveTransmissionDiagnostic() {
   const controller = createAdaptiveTransmission(80, {
     minIntervalMs: 16,
@@ -1264,6 +1282,7 @@ export async function runProtocolDiagnostics(
     ['OptiFrame · multi-frame reassembly', optiFrameStreamReassembly],
     ['OptiFrame · multi-lane round trip', optiFrameMultiLaneRoundTrip],
     ['Performance · adaptive transmission', adaptiveTransmissionDiagnostic],
+    ['Performance · OptiFrame canvas cache', optiFrameCanvasCacheDiagnostic],
     ['OR Transfer · missing-frame recovery', transferMissingRecovery],
     ['OR Transfer · corruption detection', transferCorruptionDetection],
     ['Multi-QR Photo · round trip', multiImageRoundTrip],
