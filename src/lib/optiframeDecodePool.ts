@@ -129,13 +129,13 @@ export class OptiFrameDecodePool {
       } catch (error) {
         this.pending.delete(id);
         slot.busy = false;
+        this.notifyAvailable();
         reject(error instanceof Error ? error : new Error('Unable to dispatch OptiFrame decode.'));
       }
     });
   }
 
   private notifyAvailable() {
-    if (!this.available) return;
     const waiters = [...this.availabilityWaiters];
     this.availabilityWaiters.clear();
     for (const resolve of waiters) resolve();
