@@ -13,7 +13,7 @@ export type OpticalThroughputEstimate = {
 
 export function getOptiSurfacePixels(lanes: OptiLaneCount) {
   const { columns, rows } = getOptiLaneLayout(lanes);
-  const renderScale = lanes === 1 ? 4 : lanes === 2 || lanes === 4 ? 3 : 2;
+  const renderScale = lanes === 1 ? 5 : lanes === 2 || lanes === 4 ? 3 : 2;
   return {
     width: columns * 180 * renderScale,
     height: rows * 180 * renderScale,
