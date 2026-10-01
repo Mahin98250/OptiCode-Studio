@@ -675,7 +675,7 @@ export function OptiFrameLab() {
       const rebuilt = await opticalFountainDecoderRef.current.reconstruct();
       if (rebuilt) {
         if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
-        const url = URL.createObjectURL(new Blob([rebuilt.bytes], { type: rebuilt.mime }));
+        const url = URL.createObjectURL(new Blob([rebuilt.bytes as Uint8Array<ArrayBuffer>], { type: rebuilt.mime }));
         receivedFileUrlRef.current = url;
         setReceivedFile({
           name: rebuilt.name,
