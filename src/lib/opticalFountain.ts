@@ -575,6 +575,8 @@ export class OpticalFountainDecoder {
   private solvedBytes: Uint8Array | null = null;
   private solvedBits = new Uint8Array(0);
   private solvedCount = 0;
+  private readonly solveQueue: Array<{ index: number; block: Uint8Array }> = [];
+  private solving = false;
   private readonly seenSeeds = new Set<number>();
   // Bound repair-equation memory separately from solved source blocks. A fixed
   // byte budget scales naturally between 2-bit and 4-bit blocks.
@@ -590,6 +592,8 @@ export class OpticalFountainDecoder {
     this.solvedBytes = null;
     this.solvedBits = new Uint8Array(0);
     this.solvedCount = 0;
+    this.solveQueue.length = 0;
+    this.solving = false;
     this.seenSeeds.clear();
     this.maxBufferedEquations = 2048;
   }
@@ -692,33 +696,45 @@ export class OpticalFountainDecoder {
   }
 
   private solve(index: number, block: Uint8Array) {
-    if (this.isSolved(index)) return;
-    this.ensureSolvedStorage();
-    const target = this.solvedBytes!.subarray(
-      index * this.blockBytes,
-      index * this.blockBytes + this.blockBytes,
-    );
-    target.fill(0);
-    target.set(block.subarray(0, target.length));
-    this.solvedBits[index >>> 3] |= 1 << (index & 7);
-    this.solvedCount += 1;
+    this.solveQueue.push({ index, block });
+    if (this.solving) return;
 
-    const connected = [...(this.blockToEquations.get(index) ?? [])];
-    for (const seed of connected) {
-      const equation = this.equations.get(seed);
-      if (!equation) continue;
-      xorInto(equation.data, target);
-      equation.indexes.delete(index);
-      if (equation.indexes.size === 0) {
-        this.detach(seed, equation);
-      } else if (equation.indexes.size === 1) {
-        const only = [...equation.indexes][0];
-        const candidate = equation.data.slice();
-        this.detach(seed, equation);
-        this.solve(only, candidate);
+    this.solving = true;
+    try {
+      while (this.solveQueue.length > 0) {
+        const next = this.solveQueue.pop()!;
+        if (this.isSolved(next.index)) continue;
+
+        this.ensureSolvedStorage();
+        const target = this.solvedBytes!.subarray(
+          next.index * this.blockBytes,
+          next.index * this.blockBytes + this.blockBytes,
+        );
+        target.fill(0);
+        target.set(next.block.subarray(0, target.length));
+        this.solvedBits[next.index >>> 3] |= 1 << (next.index & 7);
+        this.solvedCount += 1;
+
+        const connected = [...(this.blockToEquations.get(next.index) ?? [])];
+        for (const seed of connected) {
+          const equation = this.equations.get(seed);
+          if (!equation) continue;
+          xorInto(equation.data, target);
+          equation.indexes.delete(next.index);
+          if (equation.indexes.size === 0) {
+            this.detach(seed, equation);
+          } else if (equation.indexes.size === 1) {
+            const only = equation.indexes.values().next().value as number;
+            const candidate = equation.data.slice();
+            this.detach(seed, equation);
+            this.solveQueue.push({ index: only, block: candidate });
+          }
+        }
+        this.blockToEquations.delete(next.index);
       }
+    } finally {
+      this.solving = false;
     }
-    this.blockToEquations.delete(index);
   }
 
   private reduce(equation: Equation) {
