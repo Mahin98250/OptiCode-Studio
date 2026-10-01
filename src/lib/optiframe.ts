@@ -1044,6 +1044,41 @@ export function optiFrameSelfTest() {
     throw new Error('OptiFrame round trip failed.');
   }
 
+  const densePayload = new Uint8Array(257);
+  for (let index = 0; index < densePayload.length; index += 1) densePayload[index] = (index * 97 + 31) & 255;
+  const denseEncoded = encodeOptiFrameDense4(densePayload, 11, 23);
+  const denseDecoded = decodeOptiFrameDense4(denseEncoded.canvas);
+  if (
+    !denseDecoded ||
+    denseDecoded.sequence !== 11 ||
+    denseDecoded.total !== 23 ||
+    denseDecoded.payload.length !== densePayload.length ||
+    denseDecoded.payload.some((value, index) => value !== densePayload[index])
+  ) {
+    throw new Error('OptiFrame dense4 round trip failed.');
+  }
+
+  const denseWarped = document.createElement('canvas');
+  denseWarped.width = 900;
+  denseWarped.height = 780;
+  const denseCtx = denseWarped.getContext('2d');
+  if (!denseCtx) throw new Error('Dense4 perspective self-test canvas unavailable.');
+  denseCtx.fillStyle = '#777';
+  denseCtx.fillRect(0, 0, denseWarped.width, denseWarped.height);
+  denseCtx.setTransform(1, 0.16, -0.08, 1, 150, 120);
+  denseCtx.imageSmoothingEnabled = false;
+  denseCtx.drawImage(denseEncoded.canvas, 0, 0, 768, 768);
+  const densePerspective = decodeOptiFramePerspectiveDense4(denseWarped);
+  if (
+    !densePerspective ||
+    densePerspective.frame.sequence !== 11 ||
+    densePerspective.frame.total !== 23 ||
+    densePerspective.frame.payload.length !== densePayload.length ||
+    densePerspective.frame.payload.some((value, index) => value !== densePayload[index])
+  ) {
+    throw new Error('OptiFrame dense4 perspective self-test failed.');
+  }
+
   const warped = document.createElement('canvas');
   warped.width = 900;
   warped.height = 780;
