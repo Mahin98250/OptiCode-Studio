@@ -104,7 +104,7 @@ async function transferDenseFrameDiagnostic() {
   const file = new File([original], 'diagnostic-dense.bin', { type: 'application/octet-stream' });
   const plan = await createTransfer(file, { bytesPerFrame: 360 });
   assert(plan.bytesPerFrame === 360, 'Dense transfer plan did not select 360 bytes/frame.');
-  const raw = plan.getFrame(1);
+  const raw = await plan.getFrame(1);
   assert(raw.startsWith('ORX2:'), 'Dense transfer did not emit ORX2.');
   const parsed = parseTransferFrame(raw);
   assert(parsed, 'ORX2 dense frame did not parse.');
@@ -120,7 +120,7 @@ async function qrDenseTransferFrameWorkerDiagnostic() {
   const original = makeBytes(360, 217);
   const file = new File([original], 'diagnostic-orx2-360b.bin', { type: 'application/octet-stream' });
   const plan = await createTransfer(file, { bytesPerFrame: 360 });
-  const raw = plan.getFrame(1);
+  const raw = await plan.getFrame(1);
   const parsed = parseTransferFrame(raw);
   assert(parsed && raw.startsWith('ORX2:'), 'Dense worker fixture is not a valid ORX2 frame.');
   assert(parsed.data.length === 480, 'Dense worker fixture did not reach the 480-character Base64 budget.');
