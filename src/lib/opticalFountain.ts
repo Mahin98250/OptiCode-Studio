@@ -441,9 +441,9 @@ export async function createOpticalFountainTransfer(
       }
     }
 
-    const payload = new Uint8Array(OPTICAL_FOUNTAIN_BLOCK_BYTES);
+    const payload = new Uint8Array(blockBytes);
     if (systematic) {
-      const start = slot * OPTICAL_FOUNTAIN_BLOCK_BYTES;
+      const start = slot * blockBytes;
       payload.set(bytes.subarray(start, Math.min(bytes.length, start + blockBytes)));
     } else {
       for (const index of indexesFor(seed, totalBlocks, degree)) {
@@ -522,7 +522,7 @@ export class OpticalFountainDecoder {
       return this.snapshot(false);
     }
 
-    if (frame.blockBytes !== OPTICAL_FOUNTAIN_BLOCK_BYTES || frame.totalBlocks < 1 || frame.totalBlocks > Math.ceil(OPTICAL_FOUNTAIN_MAX_FILE_SIZE / OPTICAL_FOUNTAIN_BLOCK_BYTES)) {
+    if ((frame.blockBytes !== OPTICAL_FOUNTAIN_BLOCK_BYTES && frame.blockBytes !== OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES) || frame.totalBlocks < 1 || frame.totalBlocks > Math.ceil(OPTICAL_FOUNTAIN_MAX_FILE_SIZE / Math.min(OPTICAL_FOUNTAIN_BLOCK_BYTES, OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES))) {
       return this.snapshot(false);
     }
 
