@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Camera, CameraOff, CheckCircle2, Copy, Crosshair, Download, FlaskConical, Maximize2, Minimize2, Pause, Play, RotateCcw, ScanLine, Timer, Upload, Zap } from 'lucide-react';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { GlassButton } from '../../components/ui/GlassButton';
-import { decodeOptiFrame, decodeOptiFramePerspective, decodeOptiFramePerspectiveDense4, encodeOptiFrame, getOptiFrameCapacity, getOptiFrameDense4Capacity, inspectOptiFrameAcquisition, OPTIFRAME_SIZE, type OptiFrame, type OptiFrameAcquisitionDiagnostics, type OptiFramePerspectiveDiagnostics } from '../../lib/optiframe';
+import { decodeOptiFrame, decodeOptiFramePerspective, decodeOptiFramePerspectiveAuto, encodeOptiFrame, getOptiFrameCapacity, getOptiFrameDense4Capacity, inspectOptiFrameAcquisition, OPTIFRAME_SIZE, type OptiFrame, type OptiFrameAcquisitionDiagnostics, type OptiFramePerspectiveDiagnostics } from '../../lib/optiframe';
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from '../../lib/optiframeStream';
 import { OptiFrameDecodePool } from '../../lib/optiframeDecodePool';
 import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
@@ -806,13 +806,9 @@ export function OptiFrameLab() {
 
     const runLocal = (target: ImageData) => {
       try {
-        return decodeOptiFramePerspectiveDense4(target) ?? decodeOptiFramePerspective(target);
+        return decodeOptiFramePerspectiveAuto(target);
       } catch {
-        try {
-          return decodeOptiFramePerspective(target);
-        } catch {
-          return null;
-        }
+        return null;
       }
     };
 
