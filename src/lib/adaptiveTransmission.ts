@@ -7,6 +7,7 @@ export type AdaptiveTransmissionMetrics = {
 export type AdaptiveTransmissionState = {
   intervalMs: number;
   stableSamples: number;
+  pressureSamples: number;
 };
 
 export type AdaptiveTransmissionConfig = {
@@ -30,6 +31,7 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
   let state: AdaptiveTransmissionState = {
     intervalMs: Math.min(limits.maxIntervalMs, Math.max(limits.minIntervalMs, Math.round(initialIntervalMs))),
     stableSamples: 0,
+    pressureSamples: 0,
   };
 
   return {
@@ -42,15 +44,29 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
       const channelPressure = successRate < limits.targetSuccessRate || dropRate > limits.targetDropRate;
 
       if (renderPressure || channelPressure) {
+        // One bad sample is enough to react, but repeated pressure is
+        // deliberately bounded so noisy camera reads cannot ratchet cadence
+        // all the way to the maximum interval in a few frames.
+        state.pressureSamples += 1;
         const renderFactor = metrics.renderMs > limits.targetRenderMs * 1.8 ? 1.35 : 1.15;
         const channelFactor = channelPressure ? 1.15 : 1;
-        const next = Math.ceil(state.intervalMs * Math.max(renderFactor, channelFactor));
-        state = {
-          intervalMs: Math.min(limits.maxIntervalMs, Math.max(state.intervalMs + 1, next)),
-          stableSamples: 0,
-        };
-        return { ...state, changed: true, direction: 'slower' as const };
+        const shouldBackOff = state.intervalMs < limits.maxIntervalMs && (
+          state.pressureSamples === 1 || state.pressureSamples >= 2
+        );
+        if (shouldBackOff) {
+          const next = Math.ceil(state.intervalMs * Math.max(renderFactor, channelFactor));
+          state = {
+            intervalMs: Math.min(limits.maxIntervalMs, Math.max(state.intervalMs + 1, next)),
+            stableSamples: 0,
+            pressureSamples: 0,
+          };
+          return { ...state, changed: true, direction: 'slower' as const };
+        }
+        state.stableSamples = 0;
+        return { ...state, changed: false, direction: 'stable' as const };
       }
+
+      state.pressureSamples = 0;
 
       const comfortablyFast = metrics.renderMs < limits.targetRenderMs * 0.65;
       const healthyChannel =
@@ -64,6 +80,7 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
           state = {
             intervalMs: Math.max(limits.minIntervalMs, state.intervalMs - step),
             stableSamples: 0,
+            pressureSamples: 0,
           };
           return { ...state, changed: true, direction: 'faster' as const };
         }
@@ -78,6 +95,7 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
       state = {
         intervalMs: Math.min(limits.maxIntervalMs, Math.max(limits.minIntervalMs, Math.round(intervalMs))),
         stableSamples: 0,
+        pressureSamples: 0,
       };
     },
   };
