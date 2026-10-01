@@ -94,7 +94,7 @@ function unhex(value: string) {
 }
 
 async function sha256(bytes: Uint8Array) {
-  const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
+  const digest = await crypto.subtle.digest('SHA-256', bytes as unknown as BufferSource);
   return hex(new Uint8Array(digest));
 }
 
