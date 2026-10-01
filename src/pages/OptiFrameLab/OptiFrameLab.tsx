@@ -881,7 +881,7 @@ export function OptiFrameLab() {
       previousAnchors: OptiFramePerspectiveDiagnostics['anchors'] | null = null,
     ) => {
       const job = decodePoolRef.current.decode(
-        target.data.buffer.slice(0),
+        target.data.buffer,
         target.width,
         target.height,
         previousAnchors,
