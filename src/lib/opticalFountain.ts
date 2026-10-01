@@ -1,4 +1,5 @@
 import { getOptiFrameDense4Capacity, OPTIFRAME_MAX_PAYLOAD } from './optiframe';
+import { sha256Blob } from './sha256';
 
 const MAGIC0 = 0x4f; // "O"
 const MAGIC1 = 0x46; // "F"
@@ -56,7 +57,7 @@ export type OpticalFountainPlan = {
   blockBytes: number;
   cycleGroups: number;
   getCycleGroups: (laneCount?: 1 | 2 | 4 | 6 | 9 | 12 | 16) => number;
-  getFrame: (lane: number, group: number, laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16) => Uint8Array;
+  getFrame: (lane: number, group: number, laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16) => Promise<Uint8Array>;
 };
 
 export type OpticalFountainReceiveState = {
@@ -93,10 +94,7 @@ function unhex(value: string) {
 }
 
 async function sha256(bytes: Uint8Array) {
-  const input = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
-    ? bytes.buffer
-    : bytes.slice().buffer;
-  const digest = await crypto.subtle.digest('SHA-256', input as ArrayBuffer);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
   return hex(new Uint8Array(digest));
 }
 
@@ -227,12 +225,6 @@ function xorInto(target: Uint8Array, source: Uint8Array) {
   for (let index = words * 4; index < Math.min(target.byteLength, source.byteLength); index += 1) {
     target[index] ^= source[index];
   }
-}
-
-function normalizeBlock(bytes: Uint8Array) {
-  const out = new Uint8Array(OPTICAL_FOUNTAIN_BLOCK_BYTES);
-  out.set(bytes.subarray(0, OPTICAL_FOUNTAIN_BLOCK_BYTES));
-  return out;
 }
 
 function createDataPacket(
@@ -374,8 +366,10 @@ export async function createOpticalFountainTransfer(
 
   const densityBits = options.densityBits === 4 ? 4 : 2;
   const blockBytes = densityBits === 4 ? OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES : OPTICAL_FOUNTAIN_BLOCK_BYTES;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.buffer as ArrayBuffer));
+  // Keep the source file browser-backed. The transfer plan no longer materializes
+  // the complete file into a second Uint8Array; packets read only the source
+  // blocks needed for the current optical frame.
+  const digest = await sha256Blob(file);
   const session = randomSession();
   const sessionBytes = unhex(session);
   const sessionSeed = hashSession(session);
@@ -400,62 +394,130 @@ export async function createOpticalFountainTransfer(
   };
 
   const packetCache = new Map<string, Uint8Array>();
-  const getFrame = (lane = 0, group = 0, laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16 = 4) => {
+  const packetInFlight = new Map<string, Promise<Uint8Array>>();
+  const sourceBlockCache = new Map<number, Uint8Array>();
+  const sourceBlockInFlight = new Map<number, Promise<Uint8Array>>();
+  const SOURCE_BLOCK_CACHE_LIMIT = 96;
+
+  const cacheBlock = (index: number, block: Uint8Array) => {
+    sourceBlockCache.delete(index);
+    sourceBlockCache.set(index, block);
+    while (sourceBlockCache.size > SOURCE_BLOCK_CACHE_LIMIT) {
+      const oldest = sourceBlockCache.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      sourceBlockCache.delete(oldest);
+    }
+    return block;
+  };
+
+  const readSourceBlock = async (index: number) => {
+    const cached = sourceBlockCache.get(index);
+    if (cached) {
+      sourceBlockCache.delete(index);
+      sourceBlockCache.set(index, cached);
+      return cached;
+    }
+
+    const pending = sourceBlockInFlight.get(index);
+    if (pending) return pending;
+
+    const promise = (async () => {
+      const block = new Uint8Array(blockBytes);
+      const start = index * blockBytes;
+      const end = Math.min(file.size, start + blockBytes);
+      if (end > start) {
+        const source = new Uint8Array(await file.slice(start, end).arrayBuffer());
+        block.set(source);
+      }
+      return cacheBlock(index, block);
+    })().finally(() => {
+      sourceBlockInFlight.delete(index);
+    });
+
+    sourceBlockInFlight.set(index, promise);
+    return promise;
+  };
+
+  const cachePacket = (key: string, packet: Uint8Array) => {
+    packetCache.delete(key);
+    packetCache.set(key, packet);
+    while (packetCache.size > 64) {
+      const oldest = packetCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      packetCache.delete(oldest);
+    }
+    return packet;
+  };
+
+  const getFrame = (lane = 0, group = 0, laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16 = 4): Promise<Uint8Array> => {
     const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 || laneCount === 9 || laneCount === 12 || laneCount === 16 ? laneCount : 4;
     const normalizedLane = ((lane % activeLanes) + activeLanes) % activeLanes;
     const normalizedGroup = Math.max(0, Math.floor(group));
     const cacheKey = normalizedGroup + ':' + normalizedLane + ':' + activeLanes;
     const cachedPacket = packetCache.get(cacheKey);
-    if (cachedPacket) return cachedPacket;
-    const groupsPerCycle = getCycleGroups(activeLanes);
-    const cycleIndex = Math.floor(normalizedGroup / groupsPerCycle);
-    const groupInCycle = normalizedGroup % groupsPerCycle;
-    const cyclePacketCount = groupsPerCycle * activeLanes;
-    const slot = groupInCycle * activeLanes + normalizedLane;
+    if (cachedPacket) return Promise.resolve(cachedPacket);
 
-    // Every cycle starts with the same systematic source sweep so a receiver
-    // can join at any time. The repair tail gets fresh deterministic droplets
-    // on every cycle instead of replaying the same repair groups forever.
-    const systematic = slot < totalBlocks;
-    let seed: number;
-    let degree: number;
-    if (systematic) {
-      seed = (SYSTEMATIC_MASK | slot) >>> 0;
-      degree = 1;
-    } else {
-      const repairOrdinal = cycleIndex * Math.max(1, cyclePacketCount - totalBlocks) + (slot - totalBlocks);
-      seed = (Math.imul(repairOrdinal & RANDOM_MASK, 0x45d9f3b) ^ (sessionSeed & RANDOM_MASK)) & RANDOM_MASK;
-      if (seed === 0) seed = 0x1f123bb5;
-      degree = degreeFromSeed(seed, totalBlocks, degreeCdf);
+    const existing = packetInFlight.get(cacheKey);
+    if (existing) return existing;
 
-      // Sparse metadata refreshes share the repair tail and never replace a
-      // systematic source block. This keeps late joiners self-describing.
-      if (
-        normalizedLane === 0 &&
-        (slot - totalBlocks) % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0
-      ) {
-        const metaPacket = createMetaPacket(sessionBytes, file.size, totalBlocks, blockBytes, digest, nameBytes, mimeBytes);
-        packetCache.set(cacheKey, metaPacket);
-        if (packetCache.size > 64) packetCache.delete(packetCache.keys().next().value!);
-        return metaPacket;
+    const promise = (async () => {
+      const groupsPerCycle = getCycleGroups(activeLanes);
+      const cycleIndex = Math.floor(normalizedGroup / groupsPerCycle);
+      const groupInCycle = normalizedGroup % groupsPerCycle;
+      const cyclePacketCount = groupsPerCycle * activeLanes;
+      const slot = groupInCycle * activeLanes + normalizedLane;
+
+      // Every cycle starts with the same systematic source sweep so a receiver
+      // can join at any time. The repair tail gets fresh deterministic droplets
+      // on every cycle instead of replaying the same repair groups forever.
+      const systematic = slot < totalBlocks;
+      let seed: number;
+      let degree: number;
+      if (systematic) {
+        seed = (SYSTEMATIC_MASK | slot) >>> 0;
+        degree = 1;
+      } else {
+        const repairOrdinal = cycleIndex * Math.max(1, cyclePacketCount - totalBlocks) + (slot - totalBlocks);
+        seed = (Math.imul(repairOrdinal & RANDOM_MASK, 0x45d9f3b) ^ (sessionSeed & RANDOM_MASK)) & RANDOM_MASK;
+        if (seed === 0) seed = 0x1f123bb5;
+        degree = degreeFromSeed(seed, totalBlocks, degreeCdf);
+
+        if (
+          normalizedLane === 0 &&
+          (slot - totalBlocks) % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0
+        ) {
+          return cachePacket(
+            cacheKey,
+            createMetaPacket(sessionBytes, file.size, totalBlocks, blockBytes, digest, nameBytes, mimeBytes),
+          );
+        }
       }
-    }
 
-    const payload = new Uint8Array(blockBytes);
-    if (systematic) {
-      const start = slot * blockBytes;
-      payload.set(bytes.subarray(start, Math.min(bytes.length, start + blockBytes)));
-    } else {
-      for (const index of indexesFor(seed, totalBlocks, degree)) {
-        const start = index * blockBytes;
-        xorInto(payload, bytes.subarray(start, Math.min(bytes.length, start + blockBytes)));
+      const packet = createDataPacket(
+        sessionBytes,
+        totalBlocks,
+        blockBytes,
+        seed,
+        degree,
+        new Uint8Array(blockBytes),
+      );
+      const payload = packet.subarray(DATA_HEADER_BYTES);
+
+      if (systematic) {
+        payload.set(await readSourceBlock(slot));
+      } else {
+        const indexes = indexesFor(seed, totalBlocks, degree);
+        const blocks = await Promise.all(indexes.map(index => readSourceBlock(index)));
+        for (const block of blocks) xorInto(payload, block);
       }
-    }
 
-    const packet = createDataPacket(sessionBytes, totalBlocks, blockBytes, seed, degree, payload);
-    packetCache.set(cacheKey, packet);
-    if (packetCache.size > 64) packetCache.delete(packetCache.keys().next().value!);
-    return packet;
+      return cachePacket(cacheKey, packet);
+    })().finally(() => {
+      packetInFlight.delete(cacheKey);
+    });
+
+    packetInFlight.set(cacheKey, promise);
+    return promise;
   };
 
   return {
@@ -492,7 +554,13 @@ export class OpticalFountainDecoder {
   private blockBytes = OPTICAL_FOUNTAIN_BLOCK_BYTES;
   private readonly equations = new Map<number, Equation>();
   private readonly blockToEquations = new Map<number, Set<number>>();
-  private readonly solved = new Map<number, Uint8Array>();
+  // Store solved source blocks in one contiguous allocation rather than one
+  // Uint8Array per block. This removes tens of thousands of JS map/object
+  // entries for large transfers and lets reconstruction return a zero-copy
+  // view instead of allocating a second full-size file.
+  private solvedBytes: Uint8Array | null = null;
+  private solvedBits = new Uint8Array(0);
+  private solvedCount = 0;
   private readonly seenSeeds = new Set<number>();
   // Bound repair-equation memory separately from solved source blocks. A fixed
   // byte budget scales naturally between 2-bit and 4-bit blocks.
@@ -505,7 +573,9 @@ export class OpticalFountainDecoder {
     this.blockBytes = OPTICAL_FOUNTAIN_BLOCK_BYTES;
     this.equations.clear();
     this.blockToEquations.clear();
-    this.solved.clear();
+    this.solvedBytes = null;
+    this.solvedBits = new Uint8Array(0);
+    this.solvedCount = 0;
     this.seenSeeds.clear();
     this.maxBufferedEquations = 2048;
   }
@@ -521,6 +591,7 @@ export class OpticalFountainDecoder {
       this.totalBlocks = frame.totalBlocks;
       this.blockBytes = frame.blockBytes;
       this.maxBufferedEquations = Math.min(16384, Math.max(512, Math.floor((32 * 1024 * 1024) / this.blockBytes)));
+      this.ensureSolvedStorage();
       return this.snapshot(false);
     }
 
@@ -542,6 +613,7 @@ export class OpticalFountainDecoder {
       this.blockBytes = frame.blockBytes;
       this.meta = null;
       this.maxBufferedEquations = Math.min(16384, Math.max(512, Math.floor((32 * 1024 * 1024) / this.blockBytes)));
+      this.ensureSolvedStorage();
     }
 
     if (this.seenSeeds.has(frame.seed)) return this.snapshot(true);
@@ -573,14 +645,55 @@ export class OpticalFountainDecoder {
     return this.snapshot(false);
   }
 
+  private ensureSolvedStorage() {
+    const requiredBytes = Math.max(
+      this.blockBytes,
+      this.totalBlocks * this.blockBytes,
+    );
+    if (
+      this.solvedBytes &&
+      this.solvedBytes.byteLength >= requiredBytes &&
+      this.solvedBits.length >= Math.ceil(this.totalBlocks / 8)
+    ) return;
+
+    const previousBytes = this.solvedBytes;
+    const previousBits = this.solvedBits;
+    const nextBytes = new Uint8Array(requiredBytes);
+    if (previousBytes) nextBytes.set(previousBytes.subarray(0, Math.min(previousBytes.length, nextBytes.length)));
+    const nextBits = new Uint8Array(Math.ceil(this.totalBlocks / 8));
+    nextBits.set(previousBits.subarray(0, Math.min(previousBits.length, nextBits.length)));
+    this.solvedBytes = nextBytes;
+    this.solvedBits = nextBits;
+  }
+
+  private isSolved(index: number) {
+    if (index < 0 || index >= this.totalBlocks) return false;
+    return Boolean(this.solvedBits[index >>> 3] & (1 << (index & 7)));
+  }
+
+  private getSolved(index: number) {
+    if (!this.solvedBytes || !this.isSolved(index)) return null;
+    const start = index * this.blockBytes;
+    return this.solvedBytes.subarray(start, start + this.blockBytes);
+  }
+
   private solve(index: number, block: Uint8Array) {
-    if (this.solved.has(index)) return;
-    this.solved.set(index, block);
+    if (this.isSolved(index)) return;
+    this.ensureSolvedStorage();
+    const target = this.solvedBytes!.subarray(
+      index * this.blockBytes,
+      index * this.blockBytes + this.blockBytes,
+    );
+    target.fill(0);
+    target.set(block.subarray(0, target.length));
+    this.solvedBits[index >>> 3] |= 1 << (index & 7);
+    this.solvedCount += 1;
+
     const connected = [...(this.blockToEquations.get(index) ?? [])];
     for (const seed of connected) {
       const equation = this.equations.get(seed);
       if (!equation) continue;
-      xorInto(equation.data, block);
+      xorInto(equation.data, target);
       equation.indexes.delete(index);
       if (equation.indexes.size === 0) {
         this.detach(seed, equation);
@@ -596,7 +709,7 @@ export class OpticalFountainDecoder {
 
   private reduce(equation: Equation) {
     for (const index of [...equation.indexes]) {
-      const block = this.solved.get(index);
+      const block = this.getSolved(index);
       if (!block) continue;
       xorInto(equation.data, block);
       equation.indexes.delete(index);
@@ -620,21 +733,19 @@ export class OpticalFountainDecoder {
       mime: this.meta?.mime ?? 'application/octet-stream',
       size: this.meta?.size ?? this.totalBlocks * this.blockBytes,
       totalBlocks: this.totalBlocks,
-      receivedBlocks: this.solved.size,
+      receivedBlocks: this.solvedCount,
       seenPackets: this.seenSeeds.size,
-      bytesRecovered: this.solved.size * this.blockBytes,
-      complete: Boolean(this.meta && this.totalBlocks > 0 && this.solved.size === this.totalBlocks),
+      bytesRecovered: Math.min(this.meta?.size ?? this.solvedCount * this.blockBytes, this.solvedCount * this.blockBytes),
+      complete: Boolean(this.meta && this.totalBlocks > 0 && this.solvedCount === this.totalBlocks),
       duplicate,
     };
   }
 
   async reconstruct() {
-    if (!this.meta || this.solved.size !== this.totalBlocks) return null;
-    const bytes = new Uint8Array(this.meta.size);
+    if (!this.meta || this.solvedCount !== this.totalBlocks || !this.solvedBytes) return null;
+    const bytes = this.solvedBytes.subarray(0, this.meta.size);
     for (let index = 0; index < this.totalBlocks; index += 1) {
-      const block = this.solved.get(index);
-      if (!block) return null;
-      bytes.set(block.subarray(0, Math.min(this.blockBytes, this.meta.size - index * this.blockBytes)), index * this.blockBytes);
+      if (!this.isSolved(index)) return null;
     }
     const hash = await sha256(bytes);
     if (hash !== this.meta.hash) throw new Error('Optical fountain integrity verification failed.');
