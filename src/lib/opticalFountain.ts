@@ -211,22 +211,31 @@ function indexesFor(seed: number, blocks: number, degree: number) {
   const target = Math.min(Math.max(1, degree), blocks);
   const random = xorshift32(seed);
 
-  // Fountain degrees are normally small. Avoid Set + spread allocations in
-  // the hot path; a compact number array preserves deterministic sampling.
-  const chosen = new Array<number>(target);
-  let count = 0;
-  while (count < target) {
-    const candidate = Math.floor(random() * blocks);
-    let duplicate = false;
-    for (let i = 0; i < count; i += 1) {
-      if (chosen[i] === candidate) {
-        duplicate = true;
-        break;
+  // Most fountain droplets have tiny degree. Keep their allocation profile
+  // compact, but switch to a Set for high-degree repair packets so duplicate
+  // detection remains O(k) rather than degrading toward O(k²).
+  if (target <= 32) {
+    const chosen = new Array<number>(target);
+    let count = 0;
+    while (count < target) {
+      const candidate = Math.floor(random() * blocks);
+      let duplicate = false;
+      for (let i = 0; i < count; i += 1) {
+        if (chosen[i] === candidate) {
+          duplicate = true;
+          break;
+        }
       }
+      if (!duplicate) chosen[count++] = candidate;
     }
-    if (!duplicate) chosen[count++] = candidate;
+    return chosen;
   }
-  return chosen;
+
+  const chosen = new Set<number>();
+  while (chosen.size < target) {
+    chosen.add(Math.floor(random() * blocks));
+  }
+  return Array.from(chosen);
 }
 
 function xorInto(target: Uint8Array, source: Uint8Array) {
