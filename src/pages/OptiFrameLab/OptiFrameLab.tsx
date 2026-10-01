@@ -294,22 +294,28 @@ export function OptiFrameLab() {
 
     const queueWorkerPrefetch = async (group: number) => {
       const window = Math.min(4, Math.max(1, streamGroupCount));
-      const prefetched = await Promise.all(
-        Array.from({ length: window }, async (_, index) => {
-          const nextGroup = group + index + 1;
-          return {
-            nextGroup,
-            payloads: await getPayloads(nextGroup),
-          };
-        }),
-      );
-      for (const { nextGroup, payloads } of prefetched) {
-        const key = [
-          opticalFountainPlan?.session ?? 'chunk',
-          laneCount,
-          opticalFountainPlan ? 'fountain' : 'frames',
+      const targets = Array.from({ length: window }, (_, index) => group + index + 1)
+        .map(nextGroup => ({
           nextGroup,
-        ].join(':');
+          key: [
+            opticalFountainPlan?.session ?? 'chunk',
+            laneCount,
+            opticalFountainPlan ? 'fountain' : 'frames',
+            nextGroup,
+          ].join(':'),
+        }))
+        .filter(target => !surfacePoolRef.current.has(target.key));
+
+      if (targets.length === 0) return;
+
+      const prefetched = await Promise.all(
+        targets.map(async target => ({
+          ...target,
+          payloads: await getPayloads(target.nextGroup),
+        })),
+      );
+
+      for (const { nextGroup, key, payloads } of prefetched) {
         if (surfacePoolRef.current.has(key)) continue;
         surfacePoolRef.current.request(
           key,
