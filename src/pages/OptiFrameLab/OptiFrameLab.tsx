@@ -317,6 +317,7 @@ export function OptiFrameLab() {
           laneCount,
           payloads,
           opticalFountainPlan?.densityBits ?? opticalDensity,
+          Boolean(opticalFountainPlan),
         );
       }
     };
