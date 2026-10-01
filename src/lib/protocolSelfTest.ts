@@ -869,6 +869,10 @@ async function adaptiveTransmissionDiagnostic() {
 
   const slower = controller.observe({ renderMs: 50 });
   assert(slower.direction === 'slower' && slower.intervalMs > 80, 'Adaptive controller did not back off under render pressure.');
+  const noisy = controller.observe({ renderMs: 50 });
+  assert(!noisy.changed, 'Adaptive controller overreacted to a single repeated pressure sample.');
+  const sustained = controller.observe({ renderMs: 50 });
+  assert(sustained.direction === 'slower' && sustained.intervalMs > slower.intervalMs, 'Adaptive controller did not react to sustained pressure.');
 
   const fast = controller.getState();
   controller.observe({ renderMs: 6 });
