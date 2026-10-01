@@ -19,7 +19,7 @@ import {
   reconstructMultiImage,
 } from './imageQr';
 import { estimateOpticalSpeed, frameGenerationCeiling } from './opticalSpeedLab';
-import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_BLOCK_BYTES, parseOpticalFountainFrame } from './opticalFountain';
+import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_BLOCK_BYTES, OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES, parseOpticalFountainFrame } from './opticalFountain';
 import {
   OR_TRANSFER_CHUNK_CHARS,
   addTransferFrame,
@@ -766,6 +766,35 @@ async function opticalFountainRoundTripDiagnostic() {
   return observed + ' binary packets · ' + plan.totalBlocks + ' source blocks · ' + plan.blockBytes + '-byte blocks · complete SHA-256 verified';
 }
 
+async function opticalFountainDense4RoundTripDiagnostic() {
+  const original = makeBytes(96_000, 241);
+  const file = new File([original], 'diagnostic-optical-fountain-dense4.bin', { type: 'application/octet-stream' });
+  const plan = await createOpticalFountainTransfer(file, { densityBits: 4 });
+
+  assert(plan.densityBits === 4, 'Dense4 optical fountain plan did not retain density metadata.');
+  assert(plan.blockBytes === OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES, 'Dense4 optical fountain selected the wrong block size.');
+  assert(plan.blockBytes > OPTICAL_FOUNTAIN_BLOCK_BYTES, 'Dense4 optical fountain did not increase payload per optical packet.');
+
+  const groups = plan.getCycleGroups(4);
+  const decoder = new OpticalFountainDecoder();
+  for (let group = 0; group < groups; group += 1) {
+    for (let lane = 0; lane < 4; lane += 1) {
+      const parsed = parseOpticalFountainFrame(plan.getFrame(lane, group, 4));
+      assert(parsed, 'Dense4 optical fountain packet failed to parse.');
+      const result = decoder.add(parsed);
+      if (result.complete) break;
+    }
+    if (decoder.snapshot().complete) break;
+  }
+
+  const rebuilt = await decoder.reconstruct();
+  assert(rebuilt, 'Dense4 optical fountain did not reconstruct.');
+  expectEqualBytes(rebuilt.bytes, original, 'Dense4 optical fountain round trip');
+  assert(rebuilt.hash === plan.hash, 'Dense4 optical fountain SHA-256 mismatch.');
+
+  return plan.blockBytes + '-byte blocks · ' + plan.totalBlocks + ' source blocks · dense4 binary fountain reconstructed exactly';
+}
+
 async function opticalFountainLossRecoveryDiagnostic() {
   const original = makeBytes(180_000, 73);
   const file = new File([original], 'diagnostic-optical-fountain-loss.bin', { type: 'application/octet-stream' });
@@ -1078,6 +1107,7 @@ export async function runProtocolDiagnostics(
     ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
     ['Performance · OptiFrame encoder throughput', optiFrameEncodeThroughputDiagnostic],
     ['OptiFrame · binary fountain round trip', opticalFountainRoundTripDiagnostic],
+    ['OptiFrame · dense4 binary fountain round trip', opticalFountainDense4RoundTripDiagnostic],
     ['OptiFrame · binary fountain loss recovery', opticalFountainLossRecoveryDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
