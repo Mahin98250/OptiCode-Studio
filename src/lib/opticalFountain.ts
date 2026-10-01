@@ -29,7 +29,6 @@ type MetaFrame = {
   totalBlocks: number;
   blockBytes: number;
   hash: string;
-  hashReady: Promise<string>;
   name: string;
   mime: string;
 };
@@ -50,6 +49,7 @@ export type OpticalFountainFrame = MetaFrame | DataFrame;
 export type OpticalFountainPlan = {
   session: string;
   hash: string;
+  hashReady: Promise<string>;
   name: string;
   mime: string;
   size: number;
