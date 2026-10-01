@@ -30,7 +30,7 @@ type SurfaceWorkerSlot = {
 export class OptiFrameSurfacePool {
   private readonly workers: SurfaceWorkerSlot[] = [];
   private readonly queue: SurfaceJob[] = [];
-  private readonly pending = new Map<number, SurfaceJob>();
+  private readonly pending = new Map<number, { job: SurfaceJob; workerIndex: number }>();
   private readonly ready = new Map<string, ImageBitmap>();
   private nextId = 1;
   private generation = 0;
@@ -50,10 +50,11 @@ export class OptiFrameSurfacePool {
         );
         const slot: SurfaceWorkerSlot = { worker, busy: false, failed: false };
         worker.onmessage = (event: MessageEvent<SurfaceResponse>) => {
-          const job = this.pending.get(event.data.id);
-          if (!job) return;
+          const pending = this.pending.get(event.data.id);
+          if (!pending) return;
           this.pending.delete(event.data.id);
           slot.busy = false;
+          const job = pending.job;
 
           if (event.data.bitmap) {
             if (job.generation === this.generation) {
@@ -71,6 +72,13 @@ export class OptiFrameSurfacePool {
           slot.failed = true;
           slot.busy = false;
           worker.terminate();
+
+          // The payload buffers were transferred to the failed worker and are
+          // no longer owned by this pool. Drop those jobs so has(key) cannot
+          // permanently report a phantom in-flight surface.
+          for (const [jobId, pending] of this.pending) {
+            if (pending.workerIndex === index) this.pending.delete(jobId);
+          }
           this.dispatch();
         };
         this.workers.push(slot);
@@ -160,7 +168,7 @@ export class OptiFrameSurfacePool {
       if (!job) return;
 
       slot.busy = true;
-      this.pending.set(job.id, job);
+      this.pending.set(job.id, { job, workerIndex: this.workers.indexOf(slot) });
 
       try {
         slot.worker.postMessage(
