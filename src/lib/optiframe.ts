@@ -437,15 +437,21 @@ function bilinear(image: ImageData, x: number, y: number) {
   const y1 = Math.min(height - 1, y0 + 1);
   const dx = fx - x0;
   const dy = fy - y0;
-  const sample = (sx: number, sy: number) => {
-    const i = (sy * width + sx) * 4;
-    return (data[i] + data[i + 1] + data[i + 2]) / 3;
-  };
+  const i00 = (y0 * width + x0) * 4;
+  const i10 = (y0 * width + x1) * 4;
+  const i01 = (y1 * width + x0) * 4;
+  const i11 = (y1 * width + x1) * 4;
+  const v00 = (data[i00] + data[i00 + 1] + data[i00 + 2]) / 3;
+  const v10 = (data[i10] + data[i10 + 1] + data[i10 + 2]) / 3;
+  const v01 = (data[i01] + data[i01 + 1] + data[i01 + 2]) / 3;
+  const v11 = (data[i11] + data[i11 + 1] + data[i11 + 2]) / 3;
+  const invDx = 1 - dx;
+  const invDy = 1 - dy;
   return (
-    sample(x0, y0) * (1 - dx) * (1 - dy) +
-    sample(x1, y0) * dx * (1 - dy) +
-    sample(x0, y1) * (1 - dx) * dy +
-    sample(x1, y1) * dx * dy
+    v00 * invDx * invDy +
+    v10 * dx * invDy +
+    v01 * invDx * dy +
+    v11 * dx * dy
   );
 }
 
@@ -816,7 +822,10 @@ function decodePerspectiveFromAnchors(
   for (const coord of DATA_CELL_COORDS) {
     const r = coord >>> 8;
     const col = coord & 255;
-    const [sx, sy] = project(reverse, col, r);
+    const w = reverse[6] * col + reverse[7] * r + 1;
+    if (Math.abs(w) < 1e-9) return null;
+    const sx = (reverse[0] * col + reverse[1] * r + reverse[2]) / w;
+    const sy = (reverse[3] * col + reverse[4] * r + reverse[5]) / w;
     if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) return null;
     const raw = sampleModule(image, sx, sy, moduleScale);
     const normalized = Math.max(
@@ -873,14 +882,6 @@ function solveHomography(
   }
 
   return [...vector, 1];
-}
-
-function project(h: number[], u: number, v: number): [number, number] {
-  const w = h[6] * u + h[7] * v + 1;
-  return [
-    (h[0] * u + h[1] * v + h[2]) / w,
-    (h[3] * u + h[4] * v + h[5]) / w,
-  ];
 }
 
 function estimateCalibration(image: ImageData, anchors: ReadonlyArray<OptiFrameAnchor>) {
