@@ -1001,8 +1001,13 @@ async function adaptiveTransmissionDiagnostic() {
     targetRenderMs: 18,
   });
 
-  const slower = controller.observe({ renderMs: 50 });
+  const slower = controller.observe({ renderMs: 50, generationMs: 12, frameBudgetMs: 16.7 });
   assert(slower.direction === 'slower' && slower.intervalMs > 80, 'Adaptive controller did not back off under render pressure.');
+
+  const generationPressure = createAdaptiveTransmission(80, { minIntervalMs: 16 });
+  const generationBackoff = generationPressure.observe({ renderMs: 6, generationMs: 40, frameBudgetMs: 16.7 });
+  assert(generationBackoff.direction === 'slower' && generationBackoff.intervalMs > 80, 'Adaptive controller ignored generation pressure.');
+
   const noisy = controller.observe({ renderMs: 50 });
   assert(!noisy.changed, 'Adaptive controller overreacted to a single repeated pressure sample.');
   const sustained = controller.observe({ renderMs: 50 });
