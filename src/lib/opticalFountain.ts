@@ -325,7 +325,9 @@ export function parseOpticalFountainFrame(packet: Uint8Array): OpticalFountainFr
         blockBytes,
         seed,
         degree,
-        data: packet.slice(DATA_HEADER_BYTES),
+        // Keep the parsed packet as a view; OpticalFountainDecoder.add() owns
+        // the single defensive copy when it stores the equation data.
+        data: packet.subarray(DATA_HEADER_BYTES),
       };
     }
 
