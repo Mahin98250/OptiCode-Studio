@@ -1,4 +1,4 @@
-import { decodeOptiFramePerspective, decodeOptiFramePerspectiveDense4, type OptiFramePerspectiveDiagnostics } from '../lib/optiframe';
+import { decodeOptiFramePerspectiveAuto, type OptiFramePerspectiveDiagnostics } from '../lib/optiframe';
 
 type Request = {
   id: number;
@@ -30,7 +30,7 @@ scope.onmessage = (event) => {
   const { id, width, height, buffer, previousAnchors = null } = event.data;
   try {
     const image = new ImageData(new Uint8ClampedArray(buffer), width, height);
-    const result = decodeOptiFramePerspectiveDense4(image, previousAnchors) ?? decodeOptiFramePerspective(image, previousAnchors);
+    const result = decodeOptiFramePerspectiveAuto(image, previousAnchors);
     if (!result) {
       scope.postMessage({ id, ok: false });
       return;
