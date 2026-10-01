@@ -1037,6 +1037,8 @@ export function decodeOptiFramePerspectiveDense4(
   );
 }
 
+let preferredPerspectiveDensity: OptiFrameDensity | null = null;
+
 export function decodeOptiFramePerspectiveAuto(
   source: CanvasImageSource | ImageData,
   previousAnchors: PerspectiveAnchorSet | null = null,
@@ -1059,28 +1061,36 @@ export function decodeOptiFramePerspectiveAuto(
     anchors = [all.tl, all.tr, all.bl, all.br];
   }
 
-  const sparse = decodePerspectiveFromAnchors(
-    image,
-    anchors,
-    2,
-    HEADER_VERSION,
-    OPTIFRAME_MAX_PAYLOAD,
-  );
-  if (sparse) {
-    sparse.diagnostics.decodeMs = performance.now() - started;
-    return sparse;
+  const tryDecode = (density: OptiFrameDensity) => density === 4
+    ? decodePerspectiveFromAnchors(
+        image,
+        anchors!,
+        4,
+        DENSE4_VERSION,
+        getOptiFrameDense4Capacity(),
+      )
+    : decodePerspectiveFromAnchors(
+        image,
+        anchors!,
+        2,
+        HEADER_VERSION,
+        OPTIFRAME_MAX_PAYLOAD,
+      );
+
+  const firstDensity: OptiFrameDensity = preferredPerspectiveDensity ?? 2;
+  const first = tryDecode(firstDensity);
+  if (first) {
+    preferredPerspectiveDensity = firstDensity;
+    first.diagnostics.decodeMs = performance.now() - started;
+    return first;
   }
 
-  const dense = decodePerspectiveFromAnchors(
-    image,
-    anchors,
-    4,
-    DENSE4_VERSION,
-    getOptiFrameDense4Capacity(),
-  );
-  if (dense) {
-    dense.diagnostics.decodeMs = performance.now() - started;
-    return dense;
+  const secondDensity: OptiFrameDensity = firstDensity === 2 ? 4 : 2;
+  const second = tryDecode(secondDensity);
+  if (second) {
+    preferredPerspectiveDensity = secondDensity;
+    second.diagnostics.decodeMs = performance.now() - started;
+    return second;
   }
 
   return null;
