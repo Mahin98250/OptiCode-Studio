@@ -51,7 +51,7 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
         const renderFactor = metrics.renderMs > limits.targetRenderMs * 1.8 ? 1.35 : 1.15;
         const channelFactor = channelPressure ? 1.15 : 1;
         const shouldBackOff = state.intervalMs < limits.maxIntervalMs && (
-          state.pressureSamples === 1 || state.pressureSamples >= 2
+          state.pressureSamples === 1 || state.pressureSamples >= 3
         );
         if (shouldBackOff) {
           const next = Math.ceil(state.intervalMs * Math.max(renderFactor, channelFactor));
