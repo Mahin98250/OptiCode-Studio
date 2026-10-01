@@ -257,9 +257,12 @@ function createDataPacket(
   blockBytes: number,
   seed: number,
   degree: number,
-  data: Uint8Array,
 ) {
-  const packet = new Uint8Array(DATA_HEADER_BYTES + data.length);
+  // Allocate the packet once and expose its payload as a view. The sender
+  // previously allocated a second block-sized Uint8Array and copied it into
+  // the packet before filling it, creating avoidable memory bandwidth on every
+  // optical frame.
+  const packet = new Uint8Array(DATA_HEADER_BYTES + blockBytes);
   const view = new DataView(packet.buffer);
   packet[0] = MAGIC0;
   packet[1] = MAGIC1;
@@ -272,8 +275,7 @@ function createDataPacket(
   writeU16(view, 18, blockBytes);
   writeU32(view, 20, seed);
   writeU16(view, 24, degree);
-  writeU16(view, 26, data.length);
-  packet.set(data, DATA_HEADER_BYTES);
+  writeU16(view, 26, blockBytes);
   return packet;
 }
 
@@ -536,7 +538,6 @@ export async function createOpticalFountainTransfer(
         blockBytes,
         seed,
         degree,
-        new Uint8Array(blockBytes),
       );
       const payload = packet.subarray(DATA_HEADER_BYTES);
 
@@ -645,9 +646,17 @@ export class OpticalFountainDecoder {
       // session geometry has been established, do not let a later same-session
       // metadata packet silently rewrite block sizing underneath stored
       // equations or solved pages.
+      if (this.totalBlocks > 0 && (this.totalBlocks !== frame.totalBlocks || this.blockBytes !== frame.blockBytes)) {
+        return { ...this.snapshot(false), metaConflict: true };
+      }
       if (
-        this.totalBlocks > 0 &&
-        (this.totalBlocks !== frame.totalBlocks || this.blockBytes !== frame.blockBytes)
+        this.meta &&
+        (
+          this.meta.size !== frame.size ||
+          this.meta.hash !== frame.hash ||
+          this.meta.name !== frame.name ||
+          this.meta.mime !== frame.mime
+        )
       ) {
         return { ...this.snapshot(false), metaConflict: true };
       }
