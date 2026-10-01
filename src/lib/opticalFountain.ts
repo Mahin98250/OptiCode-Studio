@@ -1,4 +1,4 @@
-import { OPTIFRAME_MAX_PAYLOAD } from './optiframe';
+import { getOptiFrameDense4Capacity, OPTIFRAME_MAX_PAYLOAD } from './optiframe';
 
 const MAGIC0 = 0x4f; // "O"
 const MAGIC1 = 0x46; // "F"
@@ -11,6 +11,7 @@ const DATA_HEADER_BYTES = 28;
 const META_HEADER_BYTES = 58;
 
 export const OPTICAL_FOUNTAIN_BLOCK_BYTES = OPTIFRAME_MAX_PAYLOAD - DATA_HEADER_BYTES;
+export const OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES = getOptiFrameDense4Capacity() - DATA_HEADER_BYTES;
 export const OPTICAL_FOUNTAIN_MAX_FILE_SIZE = 512 * 1024 * 1024;
 export const OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS = 32;
 export const OPTICAL_FOUNTAIN_OVERHEAD = 0.16;
@@ -50,6 +51,7 @@ export type OpticalFountainPlan = {
   name: string;
   mime: string;
   size: number;
+  densityBits: 2 | 4;
   totalBlocks: number;
   blockBytes: number;
   cycleGroups: number;
@@ -301,7 +303,7 @@ export function parseOpticalFountainFrame(packet: Uint8Array): OpticalFountainFr
       const degree = readU16(view, 24);
       const dataLength = readU16(view, 26);
       if (
-        blockBytes !== OPTICAL_FOUNTAIN_BLOCK_BYTES ||
+        blockBytes !== OPTICAL_FOUNTAIN_BLOCK_BYTES && blockBytes !== OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES ||
         totalBlocks < 1 ||
         dataLength !== blockBytes ||
         degree < 1 ||
@@ -332,7 +334,7 @@ export function parseOpticalFountainFrame(packet: Uint8Array): OpticalFountainFr
       const mimeLength = readU16(view, 56);
       const payloadStart = META_HEADER_BYTES;
       if (
-        blockBytes !== OPTICAL_FOUNTAIN_BLOCK_BYTES ||
+        blockBytes !== OPTICAL_FOUNTAIN_BLOCK_BYTES && blockBytes !== OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES ||
         totalBlocks < 1 ||
         totalBlocks > Math.ceil(OPTICAL_FOUNTAIN_MAX_FILE_SIZE / OPTICAL_FOUNTAIN_BLOCK_BYTES) ||
         size > OPTICAL_FOUNTAIN_MAX_FILE_SIZE ||
@@ -362,11 +364,16 @@ export function parseOpticalFountainFrame(packet: Uint8Array): OpticalFountainFr
   return null;
 }
 
-export async function createOpticalFountainTransfer(file: File): Promise<OpticalFountainPlan> {
+export async function createOpticalFountainTransfer(
+  file: File,
+  options: { densityBits?: 2 | 4 } = {},
+): Promise<OpticalFountainPlan> {
   if (file.size > OPTICAL_FOUNTAIN_MAX_FILE_SIZE) {
     throw new Error('High-speed OptiFrame fountain mode supports files up to 512 MB.');
   }
 
+  const densityBits = options.densityBits === 4 ? 4 : 2;
+  const blockBytes = densityBits === 4 ? OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES : OPTICAL_FOUNTAIN_BLOCK_BYTES;
   const bytes = new Uint8Array(await file.arrayBuffer());
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.buffer as ArrayBuffer));
   const session = randomSession();
@@ -379,7 +386,7 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
 
   if (nameBytes.length > 2000 || mimeBytes.length > 512) throw new Error('File metadata is too large.');
 
-  const totalBlocks = Math.max(1, Math.ceil(file.size / OPTICAL_FOUNTAIN_BLOCK_BYTES));
+  const totalBlocks = Math.max(1, Math.ceil(file.size / blockBytes));
   const degreeCdf = robustSolitonCdf(totalBlocks);
 
   const recommendedPackets = Math.max(
@@ -392,10 +399,14 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
     return Math.max(1, Math.ceil(recommendedPackets / activeLanes));
   };
 
+  const packetCache = new Map<string, Uint8Array>();
   const getFrame = (lane = 0, group = 0, laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16 = 4) => {
     const activeLanes = laneCount === 1 || laneCount === 2 || laneCount === 4 || laneCount === 6 || laneCount === 9 || laneCount === 12 || laneCount === 16 ? laneCount : 4;
     const normalizedLane = ((lane % activeLanes) + activeLanes) % activeLanes;
     const normalizedGroup = Math.max(0, Math.floor(group));
+    const cacheKey = normalizedGroup + ':' + normalizedLane + ':' + activeLanes;
+    const cachedPacket = packetCache.get(cacheKey);
+    if (cachedPacket) return cachedPacket.slice();
     const groupsPerCycle = getCycleGroups(activeLanes);
     const cycleIndex = Math.floor(normalizedGroup / groupsPerCycle);
     const groupInCycle = normalizedGroup % groupsPerCycle;
@@ -423,22 +434,28 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
         normalizedLane === 0 &&
         (slot - totalBlocks) % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0
       ) {
-        return createMetaPacket(sessionBytes, file.size, totalBlocks, OPTICAL_FOUNTAIN_BLOCK_BYTES, digest, nameBytes, mimeBytes);
+        const metaPacket = createMetaPacket(sessionBytes, file.size, totalBlocks, blockBytes, digest, nameBytes, mimeBytes);
+        packetCache.set(cacheKey, metaPacket);
+        if (packetCache.size > 64) packetCache.delete(packetCache.keys().next().value!);
+        return metaPacket.slice();
       }
     }
 
     const payload = new Uint8Array(OPTICAL_FOUNTAIN_BLOCK_BYTES);
     if (systematic) {
       const start = slot * OPTICAL_FOUNTAIN_BLOCK_BYTES;
-      payload.set(bytes.subarray(start, Math.min(bytes.length, start + OPTICAL_FOUNTAIN_BLOCK_BYTES)));
+      payload.set(bytes.subarray(start, Math.min(bytes.length, start + blockBytes)));
     } else {
       for (const index of indexesFor(seed, totalBlocks, degree)) {
-        const start = index * OPTICAL_FOUNTAIN_BLOCK_BYTES;
-        xorInto(payload, bytes.subarray(start, Math.min(bytes.length, start + OPTICAL_FOUNTAIN_BLOCK_BYTES)));
+        const start = index * blockBytes;
+        xorInto(payload, bytes.subarray(start, Math.min(bytes.length, start + blockBytes)));
       }
     }
 
-    return createDataPacket(sessionBytes, totalBlocks, OPTICAL_FOUNTAIN_BLOCK_BYTES, seed, degree, payload);
+    const packet = createDataPacket(sessionBytes, totalBlocks, blockBytes, seed, degree, payload);
+    packetCache.set(cacheKey, packet);
+    if (packetCache.size > 64) packetCache.delete(packetCache.keys().next().value!);
+    return packet.slice();
   };
 
   return {
@@ -448,7 +465,8 @@ export async function createOpticalFountainTransfer(file: File): Promise<Optical
     mime,
     size: file.size,
     totalBlocks,
-    blockBytes: OPTICAL_FOUNTAIN_BLOCK_BYTES,
+    blockBytes,
+    densityBits,
     cycleGroups: getCycleGroups(4),
     getCycleGroups,
     getFrame,
