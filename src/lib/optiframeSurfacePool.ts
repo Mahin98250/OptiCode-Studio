@@ -133,6 +133,12 @@ export class OptiFrameSurfacePool {
     return bitmap;
   }
 
+  has(key: string) {
+    if (this.ready.has(key)) return true;
+    if ([...this.pending.values()].some(job => job.key === key)) return true;
+    return this.queue.some(job => job.key === key);
+  }
+
   clear() {
     this.generation += 1;
     for (const bitmap of this.ready.values()) bitmap.close();
