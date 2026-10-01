@@ -122,13 +122,22 @@ export class OptiFrameSurfacePool {
       total,
       laneCount,
       densityBits,
-      payloads: payloads.map(payload =>
-        transferPayloadOwnership &&
-        payload.byteOffset === 0 &&
-        payload.byteLength === payload.buffer.byteLength
-          ? payload.buffer
-          : payload.slice().buffer,
-      ),
+      payloads: payloads.map(payload => {
+        // Only an owned ArrayBuffer can be transferred. SharedArrayBuffer is
+        // intentionally copied so the worker transport always receives a
+        // Transferable with a stable ArrayBuffer type.
+        if (
+          transferPayloadOwnership &&
+          payload.buffer instanceof ArrayBuffer &&
+          payload.byteOffset === 0 &&
+          payload.byteLength === payload.buffer.byteLength
+        ) {
+          return payload.buffer;
+        }
+        const copy = new Uint8Array(payload.byteLength);
+        copy.set(payload);
+        return copy.buffer;
+      }),
     };
     this.queue.push(job);
     this.dispatch();
