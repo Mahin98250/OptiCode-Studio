@@ -391,26 +391,6 @@ function quantizeDense4(value: number) {
   return Math.max(0, Math.min(15, Math.round(Math.max(0, Math.min(255, value)) * 15 / 255)));
 }
 
-function decodeAxisAlignedImage(image: ImageData) {
-  return packCellsIntoBytes(
-    image,
-    2,
-    quantize,
-    HEADER_VERSION,
-    OPTIFRAME_MAX_PAYLOAD,
-  );
-}
-
-function decodeAxisAlignedImageDense4(image: ImageData) {
-  return packCellsIntoBytes(
-    image,
-    4,
-    quantizeDense4,
-    DENSE4_VERSION,
-    getOptiFrameDense4Capacity(),
-  );
-}
-
 function decodeFixedDensityImage(
   source: CanvasImageSource | ImageData,
   decode: (image: ImageData) => OptiFrame | null,
