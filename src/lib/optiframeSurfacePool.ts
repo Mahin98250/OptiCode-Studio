@@ -1,3 +1,4 @@
+import type { OptiFrameDensity } from './optiframe';
 import type { OptiLaneCount } from './optiframeLanes';
 
 type SurfaceJob = {
@@ -7,6 +8,7 @@ type SurfaceJob = {
   baseSequence: number;
   total: number;
   laneCount: OptiLaneCount;
+  densityBits: OptiFrameDensity;
   payloads: ArrayBuffer[];
 };
 
@@ -96,6 +98,7 @@ export class OptiFrameSurfacePool {
     total: number,
     laneCount: OptiLaneCount,
     payloads: readonly Uint8Array[],
+    densityBits: OptiFrameDensity = 2,
   ) {
     if (this.capacity === 0 || payloads.length !== laneCount) return false;
     if (this.ready.has(key) || [...this.pending.values()].some(job => job.key === key) || this.queue.some(job => job.key === key)) {
@@ -109,6 +112,7 @@ export class OptiFrameSurfacePool {
       baseSequence,
       total,
       laneCount,
+      densityBits,
       payloads: payloads.map(payload => payload.slice().buffer),
     };
     this.queue.push(job);
@@ -153,6 +157,7 @@ export class OptiFrameSurfacePool {
             baseSequence: job.baseSequence,
             total: job.total,
             laneCount: job.laneCount,
+            densityBits: job.densityBits,
             payloads: job.payloads,
           },
           job.payloads,
