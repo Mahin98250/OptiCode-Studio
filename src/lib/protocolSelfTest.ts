@@ -20,6 +20,7 @@ import {
 } from './imageQr';
 import { estimateOpticalSpeed, frameGenerationCeiling } from './opticalSpeedLab';
 import { createOpticalFountainTransfer, OpticalFountainDecoder, OPTICAL_FOUNTAIN_BLOCK_BYTES, OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES, parseOpticalFountainFrame } from './opticalFountain';
+import { sha256Blob } from './sha256';
 import {
   OR_TRANSFER_CHUNK_CHARS,
   addTransferFrame,
@@ -61,6 +62,16 @@ async function readBlobUrl(url: string) {
   const response = await fetch(url);
   return new Uint8Array(await response.arrayBuffer());
 }
+
+async function streamingSha256Diagnostic() {
+  const original = makeBytes(3 * 1024 * 1024 + 17, 167);
+  const file = new File([original], 'diagnostic-streaming-hash.bin', { type: 'application/octet-stream' });
+  const streaming = await sha256Blob(file);
+  const native = new Uint8Array(await crypto.subtle.digest('SHA-256', original));
+  expectEqualBytes(streaming, native, 'Streaming SHA-256');
+  return '3 MiB+17 byte browser File hashed incrementally · result matches Web Crypto';
+}
+
 
 function expectEqualBytes(actual: Uint8Array, expected: Uint8Array, label: string) {
   assert(actual.byteLength === expected.byteLength, label + ': size mismatch (' + actual.byteLength + ' !== ' + expected.byteLength + ').');
@@ -736,7 +747,7 @@ async function opticalFountainRoundTripDiagnostic() {
 
   for (let group = 0; group < groups; group += 1) {
     for (let lane = 0; lane < 4; lane += 1) {
-      const packet = plan.getFrame(lane, group, 4);
+      const packet = await plan.getFrame(lane, group, 4);
       assert(packet.byteLength <= OPTIFRAME_MAX_PAYLOAD, 'Optical fountain packet exceeded the current OptiFrame payload capacity.');
       const parsed = parseOpticalFountainFrame(packet);
       assert(parsed, 'Optical fountain packet failed to parse at group ' + group + ', lane ' + lane + '.');
@@ -751,10 +762,10 @@ async function opticalFountainRoundTripDiagnostic() {
   // generate fresh repair seeds, so repeated cycles add new redundancy.
   const repairStart = Math.floor(plan.totalBlocks / 4) + 1;
   const firstCycleRepair = parseOpticalFountainFrame(
-    plan.getFrame(0, repairStart, 4),
+    await plan.getFrame(0, repairStart, 4),
   );
   const secondCycleRepair = parseOpticalFountainFrame(
-    plan.getFrame(0, groups + repairStart, 4),
+    await plan.getFrame(0, groups + repairStart, 4),
   );
   assert(firstCycleRepair?.kind === 'data' && secondCycleRepair?.kind === 'data', 'Optical fountain repair-cycle diagnostic did not select data repairs.');
   assert(firstCycleRepair.seed !== secondCycleRepair.seed, 'Optical fountain repair cycle reused the same seed.');
@@ -779,7 +790,7 @@ async function opticalFountainDense4RoundTripDiagnostic() {
   const decoder = new OpticalFountainDecoder();
   for (let group = 0; group < groups; group += 1) {
     for (let lane = 0; lane < 4; lane += 1) {
-      const parsed = parseOpticalFountainFrame(plan.getFrame(lane, group, 4));
+      const parsed = parseOpticalFountainFrame(await plan.getFrame(lane, group, 4));
       assert(parsed, 'Dense4 optical fountain packet failed to parse.');
       const result = decoder.add(parsed);
       if (result.complete) break;
@@ -795,6 +806,58 @@ async function opticalFountainDense4RoundTripDiagnostic() {
   return plan.blockBytes + '-byte blocks · ' + plan.totalBlocks + ' source blocks · dense4 binary fountain reconstructed exactly';
 }
 
+async function opticalFountainLargeDense4StressDiagnostic() {
+  const original = makeBytes(4 * 1024 * 1024 + 123, 181);
+  const file = new File([original], 'diagnostic-optical-fountain-4m-dense4.bin', { type: 'application/octet-stream' });
+  const plan = await createOpticalFountainTransfer(file, { densityBits: 4 });
+  const groupsPerPass = plan.getCycleGroups(4);
+  const packets: Array<NonNullable<ReturnType<typeof parseOpticalFountainFrame>>> = [];
+  const passes = 2;
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (let group = 0; group < groupsPerPass; group += 1) {
+      const lanePackets = await Promise.all(
+        Array.from({ length: 4 }, async (_, lane) =>
+          parseOpticalFountainFrame(await plan.getFrame(lane, group + pass * groupsPerPass, 4)),
+        ),
+      );
+      for (let lane = 0; lane < lanePackets.length; lane += 1) {
+        const parsed = lanePackets[lane];
+        assert(parsed, 'Large dense4 stress packet did not parse.');
+        const ordinal = pass * groupsPerPass * 4 + group * 4 + lane;
+        if ((ordinal * 73 + 11) % 100 >= 18) packets.push(parsed);
+      }
+    }
+  }
+
+  packets.sort((a, b) => {
+    const av = (a.kind === 'data' ? a.seed : 0) >>> 0;
+    const bv = (b.kind === 'data' ? b.seed : 0) >>> 0;
+    return ((av ^ (av >>> 15)) - (bv ^ (bv >>> 15)));
+  });
+
+  const decoder = new OpticalFountainDecoder();
+  for (const packet of packets) {
+    const result = decoder.add(packet);
+    if (result.complete) break;
+  }
+
+  const snapshot = decoder.snapshot();
+  assert(snapshot.complete, '4 MiB dense4 lossy stress did not reach complete source recovery.');
+  const rebuilt = await decoder.reconstruct();
+  assert(rebuilt, '4 MiB dense4 lossy stress returned no reconstruction.');
+  expectEqualBytes(rebuilt.bytes, original, '4 MiB dense4 fountain stress');
+  assert(rebuilt.hash === plan.hash, '4 MiB dense4 fountain stress hash mismatch.');
+
+  return (
+    '4 MiB+ dense4 · ' +
+    plan.totalBlocks +
+    ' source blocks · ' +
+    packets.length +
+    ' delivered packets after deterministic 18% loss · exact SHA-256 verified'
+  );
+}
+
 async function opticalFountainLossRecoveryDiagnostic() {
   const original = makeBytes(180_000, 73);
   const file = new File([original], 'diagnostic-optical-fountain-loss.bin', { type: 'application/octet-stream' });
@@ -806,7 +869,7 @@ async function opticalFountainLossRecoveryDiagnostic() {
   for (let pass = 0; pass < passes; pass += 1) {
     for (let group = 0; group < groupsPerPass; group += 1) {
       for (let lane = 0; lane < 4; lane += 1) {
-        const parsed = parseOpticalFountainFrame(plan.getFrame(lane, group + pass * groupsPerPass, 4));
+        const parsed = parseOpticalFountainFrame(await plan.getFrame(lane, group + pass * groupsPerPass, 4));
         assert(parsed, 'Loss-recovery packet did not parse.');
         // Deterministic channel model: discard about 18% of packets, preserve
         // late join/out-of-order behavior by shuffling delivery afterwards.
@@ -1104,11 +1167,13 @@ export async function runProtocolDiagnostics(
     ['Performance · QR decoder worker', qrDecoderWorkerDiagnostic],
     ['Performance · exact ORX1 QR frame', qrTransferFrameWorkerDiagnostic],
     ['Performance · exact ORF2 fountain QR frame', qrFountainFrameWorkerDiagnostic],
+    ['Performance · streaming SHA-256', streamingSha256Diagnostic],
     ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
     ['Performance · OptiFrame encoder throughput', optiFrameEncodeThroughputDiagnostic],
     ['OptiFrame · binary fountain round trip', opticalFountainRoundTripDiagnostic],
     ['OptiFrame · dense4 binary fountain round trip', opticalFountainDense4RoundTripDiagnostic],
     ['OptiFrame · binary fountain loss recovery', opticalFountainLossRecoveryDiagnostic],
+    ['OptiFrame · large dense4 lossy recovery', opticalFountainLargeDense4StressDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
       return r.payloadBytes + ' payload bytes · ' + r.capacityBytes + ' byte capacity · CRC-32 verified';
