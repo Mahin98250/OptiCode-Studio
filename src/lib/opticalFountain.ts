@@ -406,7 +406,7 @@ export async function createOpticalFountainTransfer(
     const normalizedGroup = Math.max(0, Math.floor(group));
     const cacheKey = normalizedGroup + ':' + normalizedLane + ':' + activeLanes;
     const cachedPacket = packetCache.get(cacheKey);
-    if (cachedPacket) return cachedPacket.slice();
+    if (cachedPacket) return cachedPacket;
     const groupsPerCycle = getCycleGroups(activeLanes);
     const cycleIndex = Math.floor(normalizedGroup / groupsPerCycle);
     const groupInCycle = normalizedGroup % groupsPerCycle;
@@ -437,7 +437,7 @@ export async function createOpticalFountainTransfer(
         const metaPacket = createMetaPacket(sessionBytes, file.size, totalBlocks, blockBytes, digest, nameBytes, mimeBytes);
         packetCache.set(cacheKey, metaPacket);
         if (packetCache.size > 64) packetCache.delete(packetCache.keys().next().value!);
-        return metaPacket.slice();
+        return metaPacket;
       }
     }
 
@@ -455,7 +455,7 @@ export async function createOpticalFountainTransfer(
     const packet = createDataPacket(sessionBytes, totalBlocks, blockBytes, seed, degree, payload);
     packetCache.set(cacheKey, packet);
     if (packetCache.size > 64) packetCache.delete(packetCache.keys().next().value!);
-    return packet.slice();
+    return packet;
   };
 
   return {
