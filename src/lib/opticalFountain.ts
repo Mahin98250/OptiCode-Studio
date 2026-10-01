@@ -523,8 +523,18 @@ export async function createOpticalFountainTransfer(
         payload.set(await readSourceBlock(slot));
       } else {
         const indexes = indexesFor(seed, totalBlocks, degree);
-        const blocks = await Promise.all(indexes.map(index => readSourceBlock(index)));
-        for (const block of blocks) xorInto(payload, block);
+        // Normal LT droplets have low degree, where parallel reads minimize
+        // latency. Rare high-degree droplets use bounded sequential reads so a
+        // single repair packet cannot retain thousands of source blocks in RAM
+        // simultaneously.
+        if (indexes.length <= 16) {
+          const blocks = await Promise.all(indexes.map(index => readSourceBlock(index)));
+          for (const block of blocks) xorInto(payload, block);
+        } else {
+          for (const index of indexes) {
+            xorInto(payload, await readSourceBlock(index));
+          }
+        }
       }
 
       return cachePacket(cacheKey, packet);
