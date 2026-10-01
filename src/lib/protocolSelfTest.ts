@@ -3,7 +3,7 @@ import { analyzeScan } from './scan';
 import { QrEncodePool } from './qrEncodePool';
 import { QrDecodePool } from './qrDecodePool';
 import { createQrMatrices, drawQrMatricesToCanvas } from './qrCanvas';
-import { decodeOptiFrame, decodeOptiFrameDense4, decodeOptiFramePerspective, encodeOptiFrame, encodeOptiFrameDense4, getOptiFrameCapacity, getOptiFrameDense4Capacity, OPTIFRAME_SIZE, optiFrameSelfTest } from './optiframe';
+import { decodeOptiFrame, decodeOptiFrameDense4, decodeOptiFramePerspective, decodeOptiFramePerspectiveDense4, encodeOptiFrame, encodeOptiFrameDense4, getOptiFrameCapacity, getOptiFrameDense4Capacity, OPTIFRAME_SIZE, optiFrameSelfTest } from './optiframe';
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from './optiframeStream';
 import { cropOptiLaneGrid, createOptiFrameCanvasCache, createOptiLaneSurface, getOptiLaneLayout, type OptiLaneCount } from './optiframeLanes';
 import { OptiFrameDecodePool } from './optiframeDecodePool';
@@ -729,6 +729,82 @@ async function optiFrameEncodeThroughputDiagnostic() {
     ' ms total · direct 2-bit packing path exercised';
 }
 
+async function syntheticDense4CameraDiagnostic() {
+  const original = makeBytes(15_997, 233);
+  const encoded = encodeOptiFrameDense4(original, 13, 29).canvas;
+
+  const warped = document.createElement('canvas');
+  warped.width = 1024;
+  warped.height = 900;
+  const warpedCtx = warped.getContext('2d', { willReadFrequently: true });
+  assert(warpedCtx, 'Synthetic camera canvas context unavailable.');
+  warpedCtx.fillStyle = '#ffffff';
+  warpedCtx.fillRect(0, 0, warped.width, warped.height);
+  warpedCtx.imageSmoothingEnabled = false;
+
+  const topX = 265;
+  const topWidth = 490;
+  const bottomX = 145;
+  const bottomWidth = 735;
+  const topY = 55;
+  const targetHeight = 760;
+
+  for (let row = 0; row < OPTIFRAME_SIZE; row += 1) {
+    const t = row / (OPTIFRAME_SIZE - 1);
+    const x = topX + (bottomX - topX) * t;
+    const width = topWidth + (bottomWidth - topWidth) * t;
+    const y = topY + targetHeight * t;
+    const nextY = topY + targetHeight * ((row + 1) / OPTIFRAME_SIZE);
+    warpedCtx.drawImage(
+      encoded,
+      0,
+      row,
+      OPTIFRAME_SIZE,
+      1,
+      x,
+      y,
+      width,
+      Math.max(1, nextY - y + 0.5),
+    );
+  }
+
+  const rotated = document.createElement('canvas');
+  rotated.width = 1200;
+  rotated.height = 1100;
+  const rotatedCtx = rotated.getContext('2d', { willReadFrequently: true });
+  assert(rotatedCtx, 'Synthetic rotated camera context unavailable.');
+  rotatedCtx.fillStyle = '#f5f5f5';
+  rotatedCtx.fillRect(0, 0, rotated.width, rotated.height);
+  rotatedCtx.save();
+  rotatedCtx.translate(rotated.width / 2, rotated.height / 2);
+  rotatedCtx.rotate(5 * Math.PI / 180);
+  rotatedCtx.imageSmoothingEnabled = false;
+  rotatedCtx.drawImage(warped, -warped.width / 2, -warped.height / 2);
+  rotatedCtx.restore();
+
+  const image = rotatedCtx.getImageData(0, 0, rotated.width, rotated.height);
+  const pixels = image.data;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const noise = (((i / 4) * 17 + 31) % 7) - 3;
+    const value = Math.max(0, Math.min(255, pixels[i] * 0.93 + 8 + noise));
+    pixels[i] = value;
+    pixels[i + 1] = value;
+    pixels[i + 2] = value;
+  }
+  rotatedCtx.putImageData(image, 0, 0);
+
+  const result = decodeOptiFramePerspectiveDense4(rotated, null);
+  assert(result, 'Synthetic dense4 camera channel failed perspective acquisition.');
+  assert(result.frame.sequence === 13 && result.frame.total === 29, 'Synthetic dense4 camera header was not recovered exactly.');
+  expectEqualBytes(result.frame.payload, original, 'Synthetic dense4 camera payload');
+
+  return (
+    '1024×900 trapezoid + 5° rotation + exposure/noise model · ' +
+    Math.round(result.diagnostics.confidence * 100) +
+    '% anchor confidence · exact dense4 payload verified'
+  );
+}
+
 async function opticalFountainRoundTripDiagnostic() {
   const original = makeBytes(210_000, 187);
   const file = new File([original], 'diagnostic-optical-fountain.bin', { type: 'application/octet-stream' });
@@ -1134,6 +1210,7 @@ export async function runProtocolDiagnostics(
     ['Performance · streaming SHA-256', streamingSha256Diagnostic],
     ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
     ['Performance · OptiFrame encoder throughput', optiFrameEncodeThroughputDiagnostic],
+    ['OptiFrame · synthetic camera perspective', syntheticDense4CameraDiagnostic],
     ['OptiFrame · binary fountain round trip', opticalFountainRoundTripDiagnostic],
     ['OptiFrame · dense4 binary fountain round trip', opticalFountainDense4RoundTripDiagnostic],
     ['OptiFrame · binary fountain loss recovery', opticalFountainLossRecoveryDiagnostic],
