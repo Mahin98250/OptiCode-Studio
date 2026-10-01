@@ -834,8 +834,14 @@ export class OpticalFountainDecoder {
   }
 }
 
-export function opticalFountainTheoreticalBytesPerGroup(laneCount: 1 | 2 | 4 | 6) {
-  return OPTICAL_FOUNTAIN_BLOCK_BYTES * laneCount;
+export function opticalFountainTheoreticalBytesPerGroup(
+  laneCount: 1 | 2 | 4 | 6 | 9 | 12 | 16,
+  densityBits: 2 | 4 = 2,
+) {
+  const blockBytes = densityBits === 4
+    ? OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES
+    : OPTICAL_FOUNTAIN_BLOCK_BYTES;
+  return blockBytes * laneCount;
 }
 
 export function opticalFountainFrameCrc(frame: Uint8Array) {
