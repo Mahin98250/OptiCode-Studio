@@ -31,17 +31,20 @@ export type OptiFrameCanvasCache = {
 export function createOptiFrameCanvasCache(maxEntries = 96): OptiFrameCanvasCache {
   const limit = Math.max(1, Math.floor(maxEntries));
   const entries = new Map<string, HTMLCanvasElement>();
+  // Payload contents can be large (up to ~16 KB). Do not stringify/base64 them
+  // merely to form a cache key. Identity tokens are collision-free for the
+  // lifetime of each Uint8Array and do not keep payload objects alive.
+  const payloadTokens = new WeakMap<Uint8Array, number>();
+  let nextPayloadToken = 1;
 
   const payloadKey = (payload: Uint8Array, sequence: number, total: number, densityBits: OptiFrameDensity) => {
-    // Sequence alone is not a valid cache key: different lanes can reuse the
-    // same sequence while carrying different payloads. Encode the complete
-    // payload into the key so a reused sequence can never return another
-    // lane's optical frame.
-    let binary = '';
-    for (let i = 0; i < payload.length; i += 0x8000) {
-      binary += String.fromCharCode(...payload.subarray(i, Math.min(i + 0x8000, payload.length)));
+    let token = payloadTokens.get(payload);
+    if (token === undefined) {
+      token = nextPayloadToken++;
+      if (nextPayloadToken >= Number.MAX_SAFE_INTEGER) nextPayloadToken = 1;
+      payloadTokens.set(payload, token);
     }
-    return sequence + ':' + total + ':' + densityBits + ':' + btoa(binary);
+    return sequence + ':' + total + ':' + densityBits + ':' + token;
   };
 
   return {
