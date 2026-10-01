@@ -572,9 +572,10 @@ export class OpticalFountainDecoder {
   // Uint8Array per block. This removes tens of thousands of JS map/object
   // entries for large transfers and lets reconstruction return a zero-copy
   // view instead of allocating a second full-size file.
-  private solvedBytes: Uint8Array | null = null;
+  private readonly solvedPages = new Map<number, Uint8Array>();
   private solvedBits = new Uint8Array(0);
   private solvedCount = 0;
+  private static readonly SOLVED_PAGE_BLOCKS = 64;
   private readonly solveQueue: Array<{ index: number; block: Uint8Array }> = [];
   private solving = false;
   private readonly seenSeeds = new Set<number>();
@@ -589,7 +590,7 @@ export class OpticalFountainDecoder {
     this.blockBytes = OPTICAL_FOUNTAIN_BLOCK_BYTES;
     this.equations.clear();
     this.blockToEquations.clear();
-    this.solvedBytes = null;
+    this.solvedPages.clear();
     this.solvedBits = new Uint8Array(0);
     this.solvedCount = 0;
     this.solveQueue.length = 0;
@@ -664,24 +665,9 @@ export class OpticalFountainDecoder {
   }
 
   private ensureSolvedStorage() {
-    const requiredBytes = Math.max(
-      this.blockBytes,
-      this.totalBlocks * this.blockBytes,
-    );
-    if (
-      this.solvedBytes &&
-      this.solvedBytes.byteLength >= requiredBytes &&
-      this.solvedBits.length >= Math.ceil(this.totalBlocks / 8)
-    ) return;
-
-    const previousBytes = this.solvedBytes;
-    const previousBits = this.solvedBits;
-    const nextBytes = new Uint8Array(requiredBytes);
-    if (previousBytes) nextBytes.set(previousBytes.subarray(0, Math.min(previousBytes.length, nextBytes.length)));
-    const nextBits = new Uint8Array(Math.ceil(this.totalBlocks / 8));
-    nextBits.set(previousBits.subarray(0, Math.min(previousBits.length, nextBits.length)));
-    this.solvedBytes = nextBytes;
-    this.solvedBits = nextBits;
+    if (this.solvedBits.length !== Math.ceil(this.totalBlocks / 8)) {
+      this.solvedBits = new Uint8Array(Math.ceil(this.totalBlocks / 8));
+    }
   }
 
   private isSolved(index: number) {
@@ -689,10 +675,36 @@ export class OpticalFountainDecoder {
     return Boolean(this.solvedBits[index >>> 3] & (1 << (index & 7)));
   }
 
+  private pageInfo(index: number) {
+    const blocksPerPage = OpticalFountainDecoder.SOLVED_PAGE_BLOCKS;
+    const pageIndex = Math.floor(index / blocksPerPage);
+    const slot = index % blocksPerPage;
+    const remainingBlocks = Math.max(0, this.totalBlocks - pageIndex * blocksPerPage);
+    const pageBlocks = Math.min(blocksPerPage, remainingBlocks);
+    return { pageIndex, slot, pageBlocks };
+  }
+
   private getSolved(index: number) {
-    if (!this.solvedBytes || !this.isSolved(index)) return null;
-    const start = index * this.blockBytes;
-    return this.solvedBytes.subarray(start, start + this.blockBytes);
+    if (!this.isSolved(index)) return null;
+    const { pageIndex, slot } = this.pageInfo(index);
+    const page = this.solvedPages.get(pageIndex);
+    if (!page) return null;
+    const start = slot * this.blockBytes;
+    return page.subarray(start, start + this.blockBytes);
+  }
+
+  private setSolved(index: number, block: Uint8Array) {
+    const { pageIndex, slot, pageBlocks } = this.pageInfo(index);
+    let page = this.solvedPages.get(pageIndex);
+    if (!page) {
+      page = new Uint8Array(pageBlocks * this.blockBytes);
+      this.solvedPages.set(pageIndex, page);
+    }
+    const start = slot * this.blockBytes;
+    const target = page.subarray(start, start + this.blockBytes);
+    target.fill(0);
+    target.set(block.subarray(0, target.length));
+    return target;
   }
 
   private solve(index: number, block: Uint8Array) {
@@ -706,12 +718,7 @@ export class OpticalFountainDecoder {
         if (this.isSolved(next.index)) continue;
 
         this.ensureSolvedStorage();
-        const target = this.solvedBytes!.subarray(
-          next.index * this.blockBytes,
-          next.index * this.blockBytes + this.blockBytes,
-        );
-        target.fill(0);
-        target.set(next.block.subarray(0, target.length));
+        const target = this.setSolved(next.index, next.block);
         this.solvedBits[next.index >>> 3] |= 1 << (next.index & 7);
         this.solvedCount += 1;
 
@@ -771,19 +778,55 @@ export class OpticalFountainDecoder {
     };
   }
 
-  async reconstruct() {
-    if (!this.meta || this.solvedCount !== this.totalBlocks || !this.solvedBytes) return null;
-    const bytes = this.solvedBytes.subarray(0, this.meta.size);
-    for (let index = 0; index < this.totalBlocks; index += 1) {
-      if (!this.isSolved(index)) return null;
+  private async buildVerifiedBlob() {
+    if (!this.meta || this.solvedCount !== this.totalBlocks) return null;
+    this.ensureSolvedStorage();
+
+    const parts: BlobPart[] = [];
+    const pageCount = Math.ceil(this.totalBlocks / OpticalFountainDecoder.SOLVED_PAGE_BLOCKS);
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+      const page = this.solvedPages.get(pageIndex);
+      if (!page) return null;
+
+      const firstBlock = pageIndex * OpticalFountainDecoder.SOLVED_PAGE_BLOCKS;
+      const blocksOnPage = Math.min(
+        OpticalFountainDecoder.SOLVED_PAGE_BLOCKS,
+        this.totalBlocks - firstBlock,
+      );
+      for (let slot = 0; slot < blocksOnPage; slot += 1) {
+        if (!this.isSolved(firstBlock + slot)) return null;
+      }
+
+      const pageStart = firstBlock * this.blockBytes;
+      const pageBytes = Math.min(page.byteLength, Math.max(0, this.meta.size - pageStart));
+      if (pageBytes > 0) parts.push(page.subarray(0, pageBytes));
     }
-    const hash = await sha256(bytes);
+
+    const blob = new Blob(parts, { type: this.meta.mime });
+    const hash = hex(await sha256Blob(blob));
     if (hash !== this.meta.hash) throw new Error('Optical fountain integrity verification failed.');
     return {
       name: this.meta.name,
       mime: this.meta.mime,
       size: this.meta.size,
       hash,
+      blob,
+    };
+  }
+
+  async reconstructBlob() {
+    return this.buildVerifiedBlob();
+  }
+
+  async reconstruct() {
+    const rebuilt = await this.buildVerifiedBlob();
+    if (!rebuilt) return null;
+    const bytes = new Uint8Array(await rebuilt.blob.arrayBuffer());
+    return {
+      name: rebuilt.name,
+      mime: rebuilt.mime,
+      size: rebuilt.size,
+      hash: rebuilt.hash,
       bytes,
     };
   }
