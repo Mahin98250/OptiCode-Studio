@@ -494,7 +494,9 @@ export class OpticalFountainDecoder {
   private readonly blockToEquations = new Map<number, Set<number>>();
   private readonly solved = new Map<number, Uint8Array>();
   private readonly seenSeeds = new Set<number>();
-  private maxBufferedEquations = 512;
+  // Bound repair-equation memory separately from solved source blocks. A fixed
+  // byte budget scales naturally between 2-bit and 4-bit blocks.
+  private maxBufferedEquations = 2048;
 
   reset() {
     this.meta = null;
@@ -505,7 +507,7 @@ export class OpticalFountainDecoder {
     this.blockToEquations.clear();
     this.solved.clear();
     this.seenSeeds.clear();
-    this.maxBufferedEquations = 512;
+    this.maxBufferedEquations = 2048;
   }
 
   add(frame: OpticalFountainFrame) {
@@ -518,7 +520,7 @@ export class OpticalFountainDecoder {
       this.meta = frame;
       this.totalBlocks = frame.totalBlocks;
       this.blockBytes = frame.blockBytes;
-      this.maxBufferedEquations = Math.min(16384, Math.max(512, Math.ceil(frame.totalBlocks * 0.75)));
+      this.maxBufferedEquations = Math.min(16384, Math.max(512, Math.floor((32 * 1024 * 1024) / this.blockBytes)));
       return this.snapshot(false);
     }
 
@@ -539,7 +541,7 @@ export class OpticalFountainDecoder {
       this.totalBlocks = frame.totalBlocks;
       this.blockBytes = frame.blockBytes;
       this.meta = null;
-      this.maxBufferedEquations = Math.min(16384, Math.max(512, Math.ceil(frame.totalBlocks * 0.75)));
+      this.maxBufferedEquations = Math.min(16384, Math.max(512, Math.floor((32 * 1024 * 1024) / this.blockBytes)));
     }
 
     if (this.seenSeeds.has(frame.seed)) return this.snapshot(true);
