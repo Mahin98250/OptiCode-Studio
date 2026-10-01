@@ -72,6 +72,40 @@ async function streamingSha256Diagnostic() {
   return '3 MiB+17 byte browser File hashed incrementally · result matches Web Crypto';
 }
 
+async function opticalFountainHashReadinessDiagnostic() {
+  const original = makeBytes(8 * OPTICAL_FOUNTAIN_DENSE4_BLOCK_BYTES - 1, 211);
+  const file = new File([original], 'diagnostic-optical-fountain-hash-ready.bin', { type: 'application/octet-stream' });
+  const plan = await createOpticalFountainTransfer(file, { densityBits: 4 });
+
+  assert(plan.hashReady instanceof Promise, 'Optical fountain did not expose an explicit hash-ready promise.');
+  assert(plan.totalBlocks === 8, 'Hash-readiness fixture did not produce the expected 8 source blocks.');
+
+  const systematic = parseOpticalFountainFrame(await plan.getFrame(0, 0, 4));
+  assert(systematic?.kind === 'data' && systematic.degree === 1, 'Systematic fountain frame was blocked by metadata hashing.');
+
+  const expected = await sha256(original);
+  const readyHash = await plan.hashReady;
+  assert(readyHash === expected, 'Optical fountain hash-ready digest mismatch.');
+  assert(plan.hash === readyHash, 'Optical fountain plan hash did not converge to the ready digest.');
+
+  const metaGroup = plan.totalBlocks / 4;
+  const metadata = parseOpticalFountainFrame(await plan.getFrame(0, metaGroup, 4));
+  assert(metadata?.kind === 'meta', 'Optical fountain metadata was not emitted on the scheduled metadata slot.');
+  assert(metadata.hash === readyHash, 'Optical fountain metadata advertised a stale integrity hash.');
+
+  const decoder = new OpticalFountainDecoder();
+  const firstDataResult = decoder.add(systematic);
+  const conflict = decoder.add({
+    ...metadata,
+    totalBlocks: metadata.totalBlocks + 1,
+  });
+  assert(!('metaConflict' in firstDataResult), 'Unexpected metadata conflict state before metadata was received.');
+  assert(conflict.metaConflict === true, 'Conflicting same-session metadata was accepted after data receipt.');
+
+  return plan.blockBytes + '-byte dense4 blocks · systematic startup overlaps hashing · explicit hash-ready contract · metadata integrity hash verified';
+}
+
+
 
 function expectEqualBytes(actual: Uint8Array, expected: Uint8Array, label: string) {
   assert(actual.byteLength === expected.byteLength, label + ': size mismatch (' + actual.byteLength + ' !== ' + expected.byteLength + ').');
@@ -1271,6 +1305,7 @@ export async function runProtocolDiagnostics(
     ['Performance · exact ORX1 QR frame', qrTransferFrameWorkerDiagnostic],
     ['Performance · exact ORF2 fountain QR frame', qrFountainFrameWorkerDiagnostic],
     ['Performance · streaming SHA-256', streamingSha256Diagnostic],
+    ['OptiFrame · fountain hash readiness', opticalFountainHashReadinessDiagnostic],
     ['Performance · phone-geometry QR recovery', qrPhoneGeometryRecoveryDiagnostic],
     ['Performance · OptiFrame encoder throughput', optiFrameEncodeThroughputDiagnostic],
     ['OptiFrame · synthetic camera perspective', syntheticDense4CameraDiagnostic],
