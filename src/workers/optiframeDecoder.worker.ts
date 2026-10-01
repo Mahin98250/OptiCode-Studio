@@ -36,10 +36,11 @@ scope.onmessage = (event) => {
       return;
     }
 
+    // payload is typically a view into the freshly allocated packed decoder
+    // buffer. Transfer that backing buffer directly; structured cloning keeps
+    // the Uint8Array byteOffset/byteLength, eliminating a second payload copy.
     const payload = result.frame.payload;
-    const payloadBuffer = payload.byteOffset === 0 && payload.byteLength === payload.buffer.byteLength
-      ? payload.buffer
-      : payload.slice().buffer;
+    const payloadBuffer = payload.buffer;
     scope.postMessage({
       id,
       ok: true,
@@ -47,7 +48,7 @@ scope.onmessage = (event) => {
         version: result.frame.version,
         sequence: result.frame.sequence,
         total: result.frame.total,
-        payload: new Uint8Array(payloadBuffer),
+        payload,
       },
       diagnostics: result.diagnostics,
     }, [payloadBuffer]);
