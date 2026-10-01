@@ -900,6 +900,61 @@ async function opticalFountainLossRecoveryDiagnostic() {
   return delivery.length + ' delivered packets · ~18% deterministic packet loss · out-of-order delivery · ' + duplicates + ' duplicate(s) · lane-aware groups verified · recovered exactly';
 }
 
+
+async function opticalFountainLargeDense4StressDiagnostic() {
+  // Browser-only synthetic stress fixture: large enough to exercise the
+  // compact solved-block store, bounded repair-equation memory, dense4 payload
+  // size, and out-of-order/loss behavior without requiring a second device.
+  const original = makeBytes(4 * 1024 * 1024 + 37, 197);
+  const file = new File([original], 'diagnostic-optical-fountain-large-dense4.bin', { type: 'application/octet-stream' });
+  const plan = await createOpticalFountainTransfer(file, { densityBits: 4 });
+  const groupsPerPass = plan.getCycleGroups(6);
+  const passes = 2;
+  const packets: Array<NonNullable<ReturnType<typeof parseOpticalFountainFrame>>> = [];
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (let group = 0; group < groupsPerPass; group += 1) {
+      for (let lane = 0; lane < 6; lane += 1) {
+        const parsed = parseOpticalFountainFrame(
+          await plan.getFrame(lane, group + pass * groupsPerPass, 6),
+        );
+        assert(parsed, 'Large dense4 packet failed to parse.');
+        const ordinal = pass * groupsPerPass * 6 + group * 6 + lane;
+        // Deterministic ~18% optical packet loss.
+        if ((ordinal * 73 + 11) % 100 >= 18) packets.push(parsed);
+      }
+    }
+  }
+
+  // Deliberately destroy arrival ordering to model asynchronous multi-lane
+  // worker completion and camera scheduling jitter.
+  packets.sort((a, b) => {
+    const av = (a.kind === 'data' ? a.seed : 0) >>> 0;
+    const bv = (b.kind === 'data' ? b.seed : 0) >>> 0;
+    return ((av ^ (av >>> 17)) - (bv ^ (bv >>> 17)));
+  });
+
+  const decoder = new OpticalFountainDecoder();
+  for (const frame of packets) {
+    const result = decoder.add(frame);
+    if (result.complete) break;
+  }
+
+  const state = decoder.snapshot();
+  assert(state.totalBlocks === plan.totalBlocks, 'Large dense4 decoder block count mismatch.');
+  assert(state.bytesRecovered <= file.size, 'Large dense4 decoder recovered more bytes than the source.');
+  const rebuilt = await decoder.reconstruct();
+  assert(rebuilt, 'Large dense4 stress transfer did not reconstruct.');
+  expectEqualBytes(rebuilt.bytes, original, 'Large dense4 stress round trip');
+  assert(rebuilt.hash === plan.hash, 'Large dense4 stress SHA-256 mismatch.');
+
+  return (
+    Math.round(file.size / (1024 * 1024)) + ' MiB · ' +
+    plan.totalBlocks + ' dense4 source blocks · ' +
+    packets.length + ' packets after deterministic 18% loss · exact SHA-256 verified'
+  );
+}
+
 async function adaptiveTransmissionDiagnostic() {
   const controller = createAdaptiveTransmission(80, {
     minIntervalMs: 16,
@@ -1173,6 +1228,7 @@ export async function runProtocolDiagnostics(
     ['OptiFrame · binary fountain round trip', opticalFountainRoundTripDiagnostic],
     ['OptiFrame · dense4 binary fountain round trip', opticalFountainDense4RoundTripDiagnostic],
     ['OptiFrame · binary fountain loss recovery', opticalFountainLossRecoveryDiagnostic],
+    ['OptiFrame · large dense4 fountain stress', opticalFountainLargeDense4StressDiagnostic],
     ['OptiFrame · large dense4 lossy recovery', opticalFountainLargeDense4StressDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
