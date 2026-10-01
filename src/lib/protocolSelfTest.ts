@@ -1133,7 +1133,6 @@ export async function runProtocolDiagnostics(
     ['OptiFrame · binary fountain round trip', opticalFountainRoundTripDiagnostic],
     ['OptiFrame · dense4 binary fountain round trip', opticalFountainDense4RoundTripDiagnostic],
     ['OptiFrame · binary fountain loss recovery', opticalFountainLossRecoveryDiagnostic],
-    ['OptiFrame · large dense4 fountain stress', opticalFountainLargeDense4StressDiagnostic],
     ['OptiFrame · large dense4 lossy recovery', opticalFountainLargeDense4StressDiagnostic],
     ['OptiFrame · custom codec round trip', async () => {
       const r = optiFrameSelfTest();
