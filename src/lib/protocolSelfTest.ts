@@ -882,6 +882,46 @@ async function opticalFountainDense4RoundTripDiagnostic() {
   return plan.blockBytes + '-byte blocks · ' + plan.totalBlocks + ' source blocks · dense4 binary fountain reconstructed exactly';
 }
 
+async function opticalFountainLossRecoveryDiagnostic() {
+  const original = makeBytes(180_000, 73);
+  const file = new File([original], 'diagnostic-optical-fountain-loss.bin', { type: 'application/octet-stream' });
+  const plan = await createOpticalFountainTransfer(file);
+  const groupsPerPass = plan.getCycleGroups(4);
+
+  const packets: Array<NonNullable<ReturnType<typeof parseOpticalFountainFrame>>> = [];
+  const passes = 2;
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (let group = 0; group < groupsPerPass; group += 1) {
+      for (let lane = 0; lane < 4; lane += 1) {
+        const parsed = parseOpticalFountainFrame(await plan.getFrame(lane, group + pass * groupsPerPass, 4));
+        assert(parsed, 'Loss-recovery packet did not parse.');
+        const ordinal = pass * groupsPerPass * 4 + group * 4 + lane;
+        if ((ordinal * 37 + 19) % 50 >= 9) packets.push(parsed);
+      }
+    }
+  }
+
+  const delivery = packets.sort((a, b) => {
+    const av = (a.kind === 'data' ? a.seed : 0) >>> 0;
+    const bv = (b.kind === 'data' ? b.seed : 0) >>> 0;
+    return ((av ^ (av >>> 16)) - (bv ^ (bv >>> 16)));
+  });
+
+  const decoder = new OpticalFountainDecoder();
+  let duplicates = 0;
+  for (const frame of delivery) {
+    const result = decoder.add(frame);
+    if (result.duplicate) duplicates += 1;
+    if (result.complete) break;
+  }
+
+  const rebuilt = await decoder.reconstruct();
+  assert(rebuilt, 'Optical fountain failed deterministic lossy recovery.');
+  expectEqualBytes(rebuilt.bytes, original, 'Optical fountain lossy recovery');
+  assert(rebuilt.hash === plan.hash, 'Optical fountain lossy SHA-256 mismatch.');
+  return delivery.length + ' delivered packets · ~18% deterministic packet loss · out-of-order delivery · ' + duplicates + ' duplicate(s) · lane-aware groups verified · recovered exactly';
+}
+
 async function opticalFountainLargeDense4StressDiagnostic() {
   // Browser-only synthetic stress fixture: large enough to exercise the
   // compact solved-block store, bounded repair-equation memory, dense4 payload
