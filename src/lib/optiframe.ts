@@ -504,41 +504,50 @@ const QUICK_FINDER_POINTS = [
   [8, 0], [8, 4], [8, 8],
 ] as const;
 
+const COARSE_FINDER_POINTS = [
+  [0, 0, 1.4, 1],
+  [0, 4, 1.1, 1],
+  [0, 8, 1.1, 1],
+  [4, 0, 1.1, 1],
+  [4, 4, 1.5, 1],
+  [4, 8, 1.1, 1],
+  [8, 0, 1.1, 1],
+  [8, 4, 1.1, 1],
+  [8, 8, 1.4, 1],
+] as const;
+
+const COARSE_FINDER_VALUES = new Float64Array(COARSE_FINDER_POINTS.length);
+const QUICK_FINDER_VALUES = new Float64Array(QUICK_FINDER_POINTS.length);
+
 function finderCoarseScore(image: ImageData, cx: number, cy: number, moduleScale: number, angle = 0) {
   const radians = angle * Math.PI / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
-  const points = [
-    [0, 0, 1.4],
-    [0, 4, 1.1],
-    [0, 8, 1.1],
-    [4, 0, 1.1],
-    [4, 4, 1.5],
-    [4, 8, 1.1],
-    [8, 0, 1.1],
-    [8, 4, 1.1],
-    [8, 8, 1.4],
-  ] as const;
   let min = 255;
   let max = 0;
-  const samples: Array<{ value: number; expected: number; weight: number }> = [];
-  for (const [r, col, weight] of points) {
-    const dx = (col - 4) * moduleScale;
-    const dy = (r - 4) * moduleScale;
-    const x = cx + dx * cos - dy * sin;
-    const y = cy + dx * sin + dy * cos;
+
+  for (let index = 0; index < COARSE_FINDER_POINTS.length; index += 1) {
+    const point = COARSE_FINDER_POINTS[index];
+    const r = point[0];
+    const col = point[1];
+    const x = cx + ((col - 4) * moduleScale) * cos - ((r - 4) * moduleScale) * sin;
+    const y = cy + ((col - 4) * moduleScale) * sin + ((r - 4) * moduleScale) * cos;
     const value = bilinear(image, x, y);
-    min = Math.min(min, value);
-    max = Math.max(max, value);
-    samples.push({ value, expected: finderBit(r, col) ? 1 : 0, weight });
+    COARSE_FINDER_VALUES[index] = value;
+    if (value < min) min = value;
+    if (value > max) max = value;
   }
+
   if (max - min < 42) return -1;
+
+  const span = max - min;
   let error = 0;
   let totalWeight = 0;
-  for (const sample of samples) {
-    const normalized = (sample.value - min) / (max - min);
-    error += Math.abs(normalized - sample.expected) * sample.weight;
-    totalWeight += sample.weight;
+  for (let index = 0; index < COARSE_FINDER_POINTS.length; index += 1) {
+    const point = COARSE_FINDER_POINTS[index];
+    const normalized = (COARSE_FINDER_VALUES[index] - min) / span;
+    error += Math.abs(normalized - point[3]) * point[2];
+    totalWeight += point[2];
   }
   return 1 - error / totalWeight;
 }
@@ -549,30 +558,33 @@ function finderQuickScore(image: ImageData, cx: number, cy: number, moduleScale:
   const sin = Math.sin(radians);
   let min = 255;
   let max = 0;
-  const samples: Array<{ value: number; expected: number; weight: number }> = [];
 
-  for (const [r, col] of QUICK_FINDER_POINTS) {
+  for (let index = 0; index < QUICK_FINDER_POINTS.length; index += 1) {
+    const point = QUICK_FINDER_POINTS[index];
+    const r = point[0];
+    const col = point[1];
     const dx = (col - 4) * moduleScale;
     const dy = (r - 4) * moduleScale;
     const x = cx + dx * cos - dy * sin;
     const y = cy + dx * sin + dy * cos;
     const value = bilinear(image, x, y);
-    min = Math.min(min, value);
-    max = Math.max(max, value);
-    samples.push({
-      value,
-      expected: finderBit(r, col) ? 1 : 0,
-      weight: finderBit(r, col) ? 1.1 : 1.5,
-    });
+    QUICK_FINDER_VALUES[index] = value;
+    if (value < min) min = value;
+    if (value > max) max = value;
   }
 
   if (max - min < 45) return -1;
+
+  const span = max - min;
   let error = 0;
   let weight = 0;
-  for (const sample of samples) {
-    const normalized = (sample.value - min) / (max - min);
-    error += Math.abs(normalized - sample.expected) * sample.weight;
-    weight += sample.weight;
+  for (let index = 0; index < QUICK_FINDER_POINTS.length; index += 1) {
+    const point = QUICK_FINDER_POINTS[index];
+    const normalized = (QUICK_FINDER_VALUES[index] - min) / span;
+    const expected = finderBit(point[0], point[1]) ? 1 : 0;
+    const pointWeight = expected ? 1.1 : 1.5;
+    error += Math.abs(normalized - expected) * pointWeight;
+    weight += pointWeight;
   }
   return 1 - error / weight;
 }
