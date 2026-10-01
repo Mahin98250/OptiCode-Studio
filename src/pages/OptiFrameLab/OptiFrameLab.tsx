@@ -944,6 +944,7 @@ export function OptiFrameLab() {
         const elapsedFromStart = cameraStats.startedAt
           ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000)
           : 0;
+        const throughputTelemetry = observeCameraThroughput(fountainFastPath.latest.bytesRecovered, successes.length, failedLanes);
         setCameraStats(prev => ({
           ...prev,
           attempts: prev.attempts + 1,
@@ -957,7 +958,7 @@ export function OptiFrameLab() {
           decodeFps: elapsedFromStart ? (prev.hits + successes.length) / elapsedFromStart : 0,
           bytes: fountainFastPath.latest.bytesRecovered,
           goodputBps: elapsedFromStart ? fountainFastPath.latest.bytesRecovered / elapsedFromStart : 0,
-          ...observeCameraThroughput(fountainFastPath.latest.bytesRecovered, successes.length, failedLanes),
+          ...throughputTelemetry,
           lastConfidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
         }));
         return;
@@ -1036,6 +1037,7 @@ export function OptiFrameLab() {
       framesSinceFullScanRef.current = Math.min(reacquireEveryFrames, framesSinceFullScanRef.current + 1);
 
       const elapsedFromStart = cameraStats.startedAt ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000) : 0;
+      const throughputTelemetry = observeCameraThroughput(assembly.bytes, successes.length, failedLanes);
       setCameraStats(prev => ({
         ...prev,
         attempts: prev.attempts + 1,
@@ -1049,7 +1051,7 @@ export function OptiFrameLab() {
         decodeFps: elapsedFromStart ? (prev.hits + successes.length) / elapsedFromStart : 0,
         bytes: assembly.bytes,
         goodputBps: elapsedFromStart ? assembly.bytes / elapsedFromStart : 0,
-        ...observeCameraThroughput(assembly.bytes, successes.length, failedLanes),
+        ...throughputTelemetry,
         lastConfidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
       }));
 
@@ -1169,12 +1171,13 @@ export function OptiFrameLab() {
       const elapsedFromStart = cameraStats.startedAt
         ? Math.max(0.001, (performance.now() - cameraStats.startedAt) / 1000)
         : 0;
+      const throughputTelemetry = observeCameraThroughput(fountainFastPath.latest.bytesRecovered, 1, dropped ? 1 : 0);
       setCameraStats(prev => ({
         ...prev,
         duplicates: prev.duplicates + fountainFastPath.duplicateCount,
         bytes: fountainFastPath.latest.bytesRecovered,
         goodputBps: elapsedFromStart ? fountainFastPath.latest.bytesRecovered / elapsedFromStart : 0,
-        ...observeCameraThroughput(fountainFastPath.latest.bytesRecovered, 1, dropped ? 1 : 0),
+        ...throughputTelemetry,
       }));
       return;
     }
@@ -1186,6 +1189,7 @@ export function OptiFrameLab() {
     const duplicate = seenSequenceRef.current.has(frame.sequence);
     const assembly = assemblerRef.current.add(frame);
     seenSequenceRef.current.add(frame.sequence);
+    const throughputTelemetry = observeCameraThroughput(assembly.bytes, 1, dropped ? 1 : 0);
 
     setCameraStats(prev => {
       const elapsedFromStart = prev.startedAt ? Math.max(0.001, (performance.now() - prev.startedAt) / 1000) : 0;
@@ -1194,7 +1198,7 @@ export function OptiFrameLab() {
         duplicates: prev.duplicates + (duplicate ? 1 : 0),
         bytes: assembly.bytes,
         goodputBps: elapsedFromStart ? assembly.bytes / elapsedFromStart : 0,
-        ...observeCameraThroughput(assembly.bytes, result ? 1 : 0, dropped ? 1 : 0),
+        ...throughputTelemetry,
       };
     });
 
