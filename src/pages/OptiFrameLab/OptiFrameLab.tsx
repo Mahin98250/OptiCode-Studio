@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Camera, CameraOff, CheckCircle2, Copy, Crosshair, Download, FlaskConical, Maximize2, Minimize2, Pause, Play, RotateCcw, ScanLine, Timer, Upload, Zap } from 'lucide-react';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { GlassButton } from '../../components/ui/GlassButton';
-import { decodeOptiFrame, decodeOptiFramePerspective, encodeOptiFrame, getOptiFrameCapacity, inspectOptiFrameAcquisition, OPTIFRAME_SIZE, type OptiFrame, type OptiFrameAcquisitionDiagnostics, type OptiFramePerspectiveDiagnostics } from '../../lib/optiframe';
+import { decodeOptiFrame, decodeOptiFramePerspective, decodeOptiFramePerspectiveDense4, encodeOptiFrame, getOptiFrameCapacity, getOptiFrameDense4Capacity, inspectOptiFrameAcquisition, OPTIFRAME_SIZE, type OptiFrame, type OptiFrameAcquisitionDiagnostics, type OptiFramePerspectiveDiagnostics } from '../../lib/optiframe';
 import { OptiFrameAssembler, splitOptiFramePayload, utf8ToText } from '../../lib/optiframeStream';
 import { OptiFrameDecodePool } from '../../lib/optiframeDecodePool';
 import { createAdaptiveTransmission } from '../../lib/adaptiveTransmission';
@@ -106,6 +106,7 @@ export function OptiFrameLab() {
   const [streamPlaying, setStreamPlaying] = useState(false);
   const [streamIndex, setStreamIndex] = useState(0);
   const [laneCount, setLaneCount] = useState<OptiLaneCount>(1);
+  const [opticalDensity, setOpticalDensity] = useState<2 | 4>(2);
   const [streamIntervalMs, setStreamIntervalMs] = useState(8);
   const [displayRefreshHz, setDisplayRefreshHz] = useState(60);
   const [transferFile, setTransferFile] = useState<File | null>(null);
@@ -176,8 +177,13 @@ export function OptiFrameLab() {
   const laneLayout = useMemo(() => getOptiLaneLayout(laneCount), [laneCount]);
   const effectiveRefreshHz = Math.min(displayRefreshHz, 1000 / Math.max(1, streamIntervalMs));
   const throughput = useMemo(
-    () => estimateOpticalThroughput(laneCount, effectiveRefreshHz),
-    [laneCount, effectiveRefreshHz],
+    () => estimateOpticalThroughput(
+      laneCount,
+      effectiveRefreshHz,
+      1,
+      opticalFountainPlan?.blockBytes ?? (opticalDensity === 4 ? getOptiFrameDense4Capacity() : getOptiFrameCapacity()),
+    ),
+    [laneCount, effectiveRefreshHz, opticalFountainPlan?.blockBytes, opticalDensity],
   );
 
   useEffect(() => {
@@ -278,6 +284,8 @@ export function OptiFrameLab() {
             group,
             streamGroupCount,
             laneCount,
+            undefined,
+            opticalFountainPlan?.densityBits ?? opticalDensity,
           ).canvas;
         } catch {
           return;
@@ -351,7 +359,7 @@ export function OptiFrameLab() {
       senderLastPaintAtRef.current = 0;
       senderSurfaceCacheRef.current.clear();
     };
-  }, [streamPlaying, streamIntervalMs, laneCount, streamGroupCount, streamPayload, opticalFountainPlan]);
+  }, [streamPlaying, streamIntervalMs, laneCount, streamGroupCount, streamPayload, opticalFountainPlan, opticalDensity]);
 
   const streamSurface = useMemo(() => {
     try {
@@ -366,12 +374,13 @@ export function OptiFrameLab() {
         group,
         streamGroupCount,
         laneCount,
-        streamFrameCacheRef.current,
+        opticalFountainPlan ? undefined : streamFrameCacheRef.current,
+        opticalFountainPlan?.densityBits ?? opticalDensity,
       ).canvas;
     } catch {
       return null;
     }
-  }, [streamPayload, streamIndex, laneCount, streamGroupCount, opticalFountainPlan]);
+  }, [streamPayload, streamIndex, laneCount, streamGroupCount, opticalFountainPlan, opticalDensity]);
 
   useEffect(() => {
     const drawSurface = (target: HTMLCanvasElement | null) => {
@@ -496,7 +505,7 @@ export function OptiFrameLab() {
     if (!file) return;
     try {
       setStatus('Preparing ' + file.name + ' for binary optical fountain transfer…');
-      const plan = await createOpticalFountainTransfer(file);
+      const plan = await createOpticalFountainTransfer(file, { densityBits: opticalDensity });
       setTransferFile(file);
       setTransferData(null);
       setOpticalFountainPlan(plan);
@@ -511,7 +520,7 @@ export function OptiFrameLab() {
         plan.totalBlocks.toLocaleString() +
         ' source blocks · ' +
         plan.blockBytes.toLocaleString() +
-        ' bytes/optical frame payload · binary 2-bit OptiFrame fountain enabled.',
+        ' bytes/optical frame payload · binary ' + plan.densityBits + '-bit OptiFrame fountain enabled.',
       );
     } catch (error) {
       setTransferFile(null);
@@ -797,9 +806,13 @@ export function OptiFrameLab() {
 
     const runLocal = (target: ImageData) => {
       try {
-        return decodeOptiFramePerspective(target);
+        return decodeOptiFramePerspectiveDense4(target) ?? decodeOptiFramePerspective(target);
       } catch {
-        return null;
+        try {
+          return decodeOptiFramePerspective(target);
+        } catch {
+          return null;
+        }
       }
     };
 
@@ -1401,6 +1414,13 @@ export function OptiFrameLab() {
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <GlassButton onClick={() => setStreamPlaying(value => !value)}>{streamPlaying ? <Pause size={14}/> : <Play size={14}/>} {streamPlaying ? 'Pause' : 'Start sharing'}</GlassButton>
              <button onClick={() => setOpticalDisplayMode(true)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--text)]"><Maximize2 size={14}/> Full screen</button>
+            <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]">
+              Codec
+              <select value={opticalDensity} onChange={event => setOpticalDensity(Number(event.target.value) === 4 ? 4 : 2)} className="bg-transparent outline-none">
+                <option value={2}>2-bit · robust</option>
+                <option value={4}>4-bit · turbo</option>
+              </select>
+            </label>
             <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text)]">
               Speed
               <select value={streamIntervalMs} onChange={event => setStreamIntervalMs(Number(event.target.value))} className="bg-transparent outline-none">
