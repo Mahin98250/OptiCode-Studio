@@ -394,7 +394,16 @@ export async function createOpticalFountainTransfer(
   // Keep the source file browser-backed. The transfer plan no longer materializes
   // the complete file into a second Uint8Array; packets read only the source
   // blocks needed for the current optical frame.
-  const digest = await sha256Blob(file);
+  // Start integrity hashing immediately, but do not make systematic data frames
+  // wait for it. Metadata packets await the digest before advertising integrity
+  // information, so the protocol contract remains unchanged while startup work
+  // overlaps with the first source-block reads.
+  const digestPromise = sha256Blob(file);
+  let digestHex = '';
+  const digestReady = digestPromise.then(digest => {
+    digestHex = hex(digest);
+    return digest;
+  });
   const session = randomSession();
   const sessionBytes = unhex(session);
   const sessionSeed = hashSession(session);
@@ -511,6 +520,7 @@ export async function createOpticalFountainTransfer(
           normalizedLane === 0 &&
           (slot - totalBlocks) % OPTICAL_FOUNTAIN_META_INTERVAL_GROUPS === 0
         ) {
+          const digest = await digestReady;
           return cachePacket(
             cacheKey,
             createMetaPacket(sessionBytes, file.size, totalBlocks, blockBytes, digest, nameBytes, mimeBytes),
@@ -557,7 +567,9 @@ export async function createOpticalFountainTransfer(
 
   return {
     session,
-    hash: hex(digest),
+    get hash() {
+      return digestHex;
+    },
     name,
     mime,
     size: file.size,
