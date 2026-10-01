@@ -85,10 +85,11 @@ export function createOptiLaneSurface(
   }
 
   const layout = getOptiLaneLayout(laneCount);
-  // Physical profiles: 1×=4 px/module, 2×/4×=3 px/module, and
-  // 6×/9×/12×/16×=2 px/module. High-lane modes trade per-lane module
-  // scale for parallel optical bandwidth and are intended for large screens.
-  const renderScale = laneCount === 1 ? 4 : laneCount === 2 || laneCount === 4 ? 3 : 2;
+  // Physical profiles: 1×=5 px/module, 2×/4×=3 px/module, and
+  // 6×/9×/12×/16×=2 px/module. The single-lane profile deliberately gets
+  // more physical pixels per optical module because it is the baseline camera
+  // acquisition mode and has no parallelism to trade against module size.
+  const renderScale = laneCount === 1 ? 5 : laneCount === 2 || laneCount === 4 ? 3 : 2;
   const laneRenderSize = OPTIFRAME_SIZE * renderScale;
   const canvas = document.createElement('canvas');
   canvas.width = layout.columns * laneRenderSize;
@@ -108,7 +109,7 @@ export function createOptiLaneSurface(
         ? frameCache.get(payloads[lane], sequence, total)
         : encodeOptiFrame(payloads[lane], sequence, total).canvas;
     frames.push({
-      version: 2,
+      version: densityBits === 4 ? 3 : 2,
       sequence,
       total,
       payload: payloads[lane],
