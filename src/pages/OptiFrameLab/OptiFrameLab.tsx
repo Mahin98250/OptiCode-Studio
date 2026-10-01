@@ -29,6 +29,8 @@ type CameraStats = {
   cameraHeight: number;
   cameraFrameRate: number;
   startedAt: number | null;
+  rollingGoodputBps: number;
+  rollingReadSuccessRate: number;
 };
 
 
@@ -62,6 +64,7 @@ type AcquisitionTestState = {
 };
 
 const ACQUISITION_TEST_SAMPLES = 30;
+const GOODPUT_WINDOW_MS = 5000;
 
 function emptyAcquisitionStageCounts(): AcquisitionTestStageCounts {
   return {
@@ -98,7 +101,7 @@ export function OptiFrameLab() {
   const [cameraError, setCameraError] = useState('');
   const [cameraDecoded, setCameraDecoded] = useState('');
   const [receiver, setReceiver] = useState({ total: 0, received: 0, bytes: 0, missing: [] as number[], complete: false });
-  const [cameraStats, setCameraStats] = useState<CameraStats>({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: null });
+  const [cameraStats, setCameraStats] = useState<CameraStats>({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: null, rollingGoodputBps: 0, rollingReadSuccessRate: 0 });
   const [acquisition, setAcquisition] = useState<OptiFrameAcquisitionDiagnostics>({ stage: 'image', anchors: [], confidence: 0, moduleScale: 0, angle: 0, geometryRatio: 0, sampleWidth: 0, sampleHeight: 0, elapsedMs: 0 });
   const [cameraCapabilities, setCameraCapabilities] = useState<string[]>([]);
   const [acquisitionTest, setAcquisitionTest] = useState<AcquisitionTestState>(emptyAcquisitionTest);
@@ -152,6 +155,53 @@ export function OptiFrameLab() {
   const streamFrameCacheRef = useRef(createOptiFrameCanvasCache(96));
   const adaptiveTransmissionRef = useRef(createAdaptiveTransmission(80));
   const opticalDecodeInFlightRef = useRef(0);
+  const throughputTelemetryRef = useRef({
+    samples: [] as Array<{ at: number; bytes: number; decoded: number; dropped: number }>,
+    decoded: 0,
+    dropped: 0,
+    bytes: 0,
+  });
+
+  function resetThroughputTelemetry() {
+    throughputTelemetryRef.current = {
+      samples: [],
+      decoded: 0,
+      dropped: 0,
+      bytes: 0,
+    };
+  }
+
+  function observeCameraThroughput(bytes: number, decodedDelta: number, droppedDelta: number) {
+    const now = performance.now();
+    const telemetry = throughputTelemetryRef.current;
+    telemetry.bytes = Math.max(0, bytes);
+    telemetry.decoded += Math.max(0, decodedDelta);
+    telemetry.dropped += Math.max(0, droppedDelta);
+    telemetry.samples.push({
+      at: now,
+      bytes: telemetry.bytes,
+      decoded: telemetry.decoded,
+      dropped: telemetry.dropped,
+    });
+
+    const cutoff = now - GOODPUT_WINDOW_MS;
+    while (telemetry.samples.length > 2 && telemetry.samples[0].at < cutoff) {
+      telemetry.samples.shift();
+    }
+
+    const oldest = telemetry.samples[0];
+    const newest = telemetry.samples[telemetry.samples.length - 1];
+    const elapsed = oldest && newest ? Math.max(0.25, (newest.at - oldest.at) / 1000) : 0.25;
+    const bytesDelta = oldest && newest ? Math.max(0, newest.bytes - oldest.bytes) : 0;
+    const decodedWindow = oldest && newest ? Math.max(0, newest.decoded - oldest.decoded) : telemetry.decoded;
+    const droppedWindow = oldest && newest ? Math.max(0, newest.dropped - oldest.dropped) : telemetry.dropped;
+    const reads = decodedWindow + droppedWindow;
+
+    return {
+      rollingGoodputBps: bytesDelta / elapsed,
+      rollingReadSuccessRate: reads > 0 ? decodedWindow / reads : 0,
+    };
+  }
 
   const streamPayload = useMemo(() => {
     if (opticalFountainPlan) return [] as Uint8Array[];
@@ -258,6 +308,7 @@ export function OptiFrameLab() {
           streamGroupCount,
           laneCount,
           getPayloads(nextGroup),
+          opticalFountainPlan?.densityBits ?? opticalDensity,
         );
       }
     };
@@ -512,6 +563,7 @@ export function OptiFrameLab() {
       setStreamIndex(0);
       setStreamIntervalMs(8);
       setStreamPlaying(false);
+      setOpticalDensity(densityOverride);
       setStatus(
         file.name +
         ' ready · ' +
@@ -905,6 +957,7 @@ export function OptiFrameLab() {
           decodeFps: elapsedFromStart ? (prev.hits + successes.length) / elapsedFromStart : 0,
           bytes: fountainFastPath.latest.bytesRecovered,
           goodputBps: elapsedFromStart ? fountainFastPath.latest.bytesRecovered / elapsedFromStart : 0,
+          ...observeCameraThroughput(fountainFastPath.latest.bytesRecovered, successes.length, failedLanes),
           lastConfidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
         }));
         return;
@@ -996,6 +1049,7 @@ export function OptiFrameLab() {
         decodeFps: elapsedFromStart ? (prev.hits + successes.length) / elapsedFromStart : 0,
         bytes: assembly.bytes,
         goodputBps: elapsedFromStart ? assembly.bytes / elapsedFromStart : 0,
+        ...observeCameraThroughput(assembly.bytes, successes.length, failedLanes),
         lastConfidence: successes.reduce((sum, entry) => sum + (entry.result?.diagnostics.confidence ?? 0), 0) / successes.length,
       }));
 
@@ -1120,6 +1174,7 @@ export function OptiFrameLab() {
         duplicates: prev.duplicates + fountainFastPath.duplicateCount,
         bytes: fountainFastPath.latest.bytesRecovered,
         goodputBps: elapsedFromStart ? fountainFastPath.latest.bytesRecovered / elapsedFromStart : 0,
+        ...observeCameraThroughput(fountainFastPath.latest.bytesRecovered, 1, dropped ? 1 : 0),
       }));
       return;
     }
@@ -1139,6 +1194,7 @@ export function OptiFrameLab() {
         duplicates: prev.duplicates + (duplicate ? 1 : 0),
         bytes: assembly.bytes,
         goodputBps: elapsedFromStart ? assembly.bytes / elapsedFromStart : 0,
+        ...observeCameraThroughput(assembly.bytes, result ? 1 : 0, dropped ? 1 : 0),
       };
     });
 
@@ -1184,7 +1240,8 @@ export function OptiFrameLab() {
     acquisitionTestRef.current = false;
     acquisitionTestMetricsRef.current = emptyAcquisitionTest();
     setAcquisitionTest(emptyAcquisitionTest());
-    setCameraStats({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: performance.now() });
+    resetThroughputTelemetry();
+    setCameraStats({ attempts: 0, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, lastMs: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0, cameraWidth: 0, cameraHeight: 0, cameraFrameRate: 0, startedAt: performance.now(), rollingGoodputBps: 0, rollingReadSuccessRate: 0 });
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1314,7 +1371,8 @@ export function OptiFrameLab() {
     if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
     receivedFileUrlRef.current = '';
     setReceivedFileUrl('');
-    setCameraStats(prev => ({ ...prev, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, lastConfidence: 0 }));
+    resetThroughputTelemetry();
+    setCameraStats(prev => ({ ...prev, hits: 0, duplicates: 0, dropped: 0, workerHits: 0, localHits: 0, bytes: 0, captureFps: 0, decodeFps: 0, goodputBps: 0, rollingGoodputBps: 0, rollingReadSuccessRate: 0, lastConfidence: 0 }));
   }
 
   return (
@@ -1325,7 +1383,7 @@ export function OptiFrameLab() {
           <h1 className="mt-2 text-4xl font-black text-[var(--text)] sm:text-6xl">Share files using your screen.</h1>
           <p className="mt-4 max-w-4xl text-sm leading-7 text-[var(--text-muted)]">Choose a file, show it on this screen, and use another device to receive it. Advanced test controls are below.</p>
         </div>
-        <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-300">{capacity} bytes/frame · 2-bit optical</div>
+        <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-300">{opticalDensity === 4 ? getOptiFrameDense4Capacity() : capacity} bytes/frame · {opticalDensity}-bit optical</div>
       </div>
 
       <GlassCard>
@@ -1444,7 +1502,7 @@ export function OptiFrameLab() {
           </div>
            <div className="mt-4 grid gap-3 sm:grid-cols-3">
              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-cyan-200">Measured display</p><p className="mt-1 text-lg font-black text-[var(--text)]">{displayRefreshHz.toFixed(1)} Hz</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">Browser paint cadence</p></div>
-             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Ideal optical pipe</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatRate(throughput.idealBytesPerSecond)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{laneCount} lanes × {effectiveRefreshHz.toFixed(1)} Hz × {capacity.toLocaleString()} B</p></div>
+             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">Ideal optical pipe</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatRate(throughput.idealBytesPerSecond)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{laneCount} lanes × {effectiveRefreshHz.toFixed(1)} Hz × {throughput.payloadBytesPerLaneFrame.toLocaleString()} B</p></div>
              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-4"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[var(--text-muted)]">300 MB ideal time</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatTransferTime(throughput.secondsFor300MB)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">No camera loss / no FEC overhead</p></div>
            </div>
            <p className="mt-3 text-xs text-[var(--text-muted)]">{transferFile ? 'High-speed file mode uses binary fountain packets directly inside each OptiFrame. More lanes increase the theoretical pipe, while actual goodput is bounded by the sender display, receiver camera, exposure, focus, decoder latency and packet loss. ' : ''}{laneCount > 1 ? `Multi-lane mode displays ${laneCount} independent frames at once on a ${laneLayout.columns}:${laneLayout.rows} grid and sends the complete lane batch to the worker pool.` : 'On the sending device, choose a file above, then press Start sharing or Full screen. On the receiving device, open the same page, press Start camera, and point it at this optical surface. Keep the whole code inside the guide.'}</p>
@@ -1546,6 +1604,10 @@ export function OptiFrameLab() {
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Workers</p><p className="mt-1 text-lg font-black text-[var(--text)]">{decodePoolRef.current.busyCount}/{decodePoolRef.current.capacity}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Decode FPS</p><p className="mt-1 text-lg font-black text-[var(--text)]">{cameraStats.decodeFps.toFixed(1)}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Anchor confidence</p><p className="mt-1 text-lg font-black text-[var(--text)]">{Math.round(cameraStats.lastConfidence * 100)}%</p></div>
+            <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-3"><p className="text-[10px] text-cyan-200">Live goodput</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatRate(cameraStats.rollingGoodputBps)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">5 s rolling receiver rate</p></div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Read success</p><p className="mt-1 text-lg font-black text-[var(--text)]">{cameraStats.rollingReadSuccessRate ? Math.round(cameraStats.rollingReadSuccessRate * 100) + '%' : '—'}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">Decoded / observed</p></div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">200 MB measured ETA</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatTransferTime(cameraStats.rollingGoodputBps > 0 ? (200 * 1024 * 1024) / cameraStats.rollingGoodputBps : Number.POSITIVE_INFINITY)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">From current receiver goodput</p></div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">300 MB measured ETA</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatTransferTime(cameraStats.rollingGoodputBps > 0 ? (300 * 1024 * 1024) / cameraStats.rollingGoodputBps : Number.POSITIVE_INFINITY)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">Uses last 5 s, not the ideal pipe</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Camera</p><p className="mt-1 text-sm font-black text-[var(--text)]">{cameraStats.cameraWidth && cameraStats.cameraHeight ? `${cameraStats.cameraWidth}×${cameraStats.cameraHeight}` : '—'}</p></div>
           </div>
         </GlassCard>
