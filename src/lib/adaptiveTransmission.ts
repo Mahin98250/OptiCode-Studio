@@ -1,5 +1,7 @@
 export type AdaptiveTransmissionMetrics = {
   renderMs: number;
+  generationMs?: number;
+  frameBudgetMs?: number;
   decodeSuccessRate?: number;
   droppedRate?: number;
 };
@@ -40,7 +42,9 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
     observe(metrics: AdaptiveTransmissionMetrics) {
       const successRate = metrics.decodeSuccessRate ?? 1;
       const dropRate = metrics.droppedRate ?? 0;
-      const renderPressure = metrics.renderMs > limits.targetRenderMs;
+      const frameBudget = Math.max(6, metrics.frameBudgetMs ?? limits.targetRenderMs);
+      const renderPressure = metrics.renderMs > frameBudget;
+      const generationPressure = (metrics.generationMs ?? 0) > frameBudget;
       const channelPressure = successRate < limits.targetSuccessRate || dropRate > limits.targetDropRate;
 
       if (renderPressure || channelPressure) {
@@ -48,13 +52,14 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
         // deliberately bounded so noisy camera reads cannot ratchet cadence
         // all the way to the maximum interval in a few frames.
         state.pressureSamples += 1;
-        const renderFactor = metrics.renderMs > limits.targetRenderMs * 1.8 ? 1.35 : 1.15;
+        const renderFactor = metrics.renderMs > frameBudget * 1.8 ? 1.35 : 1.15;
+        const generationFactor = generationPressure && (metrics.generationMs ?? 0) > frameBudget * 1.8 ? 1.35 : generationPressure ? 1.15 : 1;
         const channelFactor = channelPressure ? 1.15 : 1;
         const shouldBackOff = state.intervalMs < limits.maxIntervalMs && (
           state.pressureSamples === 1 || state.pressureSamples >= 3
         );
         if (shouldBackOff) {
-          const next = Math.ceil(state.intervalMs * Math.max(renderFactor, channelFactor));
+          const next = Math.ceil(state.intervalMs * Math.max(renderFactor, generationFactor, channelFactor));
           state = {
             intervalMs: Math.min(limits.maxIntervalMs, Math.max(state.intervalMs + 1, next)),
             stableSamples: 0,
@@ -68,7 +73,9 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
 
       state.pressureSamples = 0;
 
-      const comfortablyFast = metrics.renderMs < limits.targetRenderMs * 0.65;
+      const comfortablyFast =
+        metrics.renderMs < frameBudget * 0.65 &&
+        (metrics.generationMs === undefined || metrics.generationMs < frameBudget * 0.65);
       const healthyChannel =
         successRate >= Math.min(0.98, limits.targetSuccessRate + 0.1) &&
         dropRate <= limits.targetDropRate * 0.5;
