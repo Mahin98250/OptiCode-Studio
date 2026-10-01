@@ -208,11 +208,25 @@ function degreeFromSeed(seed: number, blocks: number, cdf: ArrayLike<number>) {
 function indexesFor(seed: number, blocks: number, degree: number) {
   if (degree === 1 && (seed >>> 0) >= SYSTEMATIC_MASK) return [seed & RANDOM_MASK];
 
-  const random = xorshift32(seed);
-  const chosen = new Set<number>();
   const target = Math.min(Math.max(1, degree), blocks);
-  while (chosen.size < target) chosen.add(Math.floor(random() * blocks));
-  return [...chosen];
+  const random = xorshift32(seed);
+
+  // Fountain degrees are normally small. Avoid Set + spread allocations in
+  // the hot path; a compact number array preserves deterministic sampling.
+  const chosen = new Array<number>(target);
+  let count = 0;
+  while (count < target) {
+    const candidate = Math.floor(random() * blocks);
+    let duplicate = false;
+    for (let i = 0; i < count; i += 1) {
+      if (chosen[i] === candidate) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) chosen[count++] = candidate;
+  }
+  return chosen;
 }
 
 function xorInto(target: Uint8Array, source: Uint8Array) {
