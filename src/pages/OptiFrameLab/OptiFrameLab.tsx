@@ -762,6 +762,7 @@ export function OptiFrameLab() {
         context.imageSmoothingEnabled = false;
         context.drawImage(video, x / scale, y / scale, roiWidth / scale, roiHeight / scale, 0, 0, roiWidth, roiHeight);
         image = context.getImageData(0, 0, roiWidth, roiHeight);
+        directTrackedCrop = { image, offsetX: x, offsetY: y };
         captureOriginRef.current = { x, y };
       } else {
         image = captureFullFrame();
@@ -905,7 +906,7 @@ export function OptiFrameLab() {
       // fewer workers than the selected optical grid.
       const workerResults = await decodePoolRef.current.decodeBatch(
         lanes.map(lane => ({
-          buffer: lane.image.data.buffer.slice(0),
+          buffer: lane.image.data.buffer,
           width: lane.image.width,
           height: lane.image.height,
           previousAnchors: trackedLaneAnchorsRef.current.get(lane.lane)?.map(anchor => ({
