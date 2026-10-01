@@ -6,9 +6,8 @@ const HEADER_VERSION = 2;
 const FINDER_SIZE = 9;
 const FINDER_OFFSET = 4;
 const LUMINANCE_LEVELS = [0, 85, 170, 255] as const;
-const DENSE4_LUMINANCE_LEVELS = Array.from({ length: 16 }, (_, index) => Math.round(index * 255 / 15));
+const DENSE4_LUMINANCE_LEVELS: readonly number[] = Array.from({ length: 16 }, (_, index) => Math.round(index * 255 / 15));
 const DENSE4_VERSION = 3;
-const DENSE4_SYMBOL_BITS = 4;
 export type OptiFrameDensity = 2 | 4;
 
 export type OptiFrame = {
@@ -112,29 +111,31 @@ function capacityBits(bitsPerCell: OptiFrameDensity = 2) {
 }
 
 export function getOptiFrameCapacityForBits(bitsPerCell: OptiFrameDensity) {
-  const hardCap = bitsPerCell === 4 ? Math.floor(capacityBits(bitsPerCell) / 8) - 4 : OPTIFRAME_MAX_PAYLOAD;
-  return Math.max(0, hardCap);
+  return Math.max(0, Math.floor(capacityBits(bitsPerCell) / 8) - 4);
 }
 
 export function getOptiFrameCapacity() {
-  return Math.min(OPTIFRAME_MAX_PAYLOAD, Math.floor(capacityBits(2) / 8) - 4);
+  return getOptiFrameCapacityForBits(2);
 }
 
 export function getOptiFrameDense4Capacity() {
   return getOptiFrameCapacityForBits(4);
 }
 
-function rasterizeOptiFrameWithDensity(
-  payload: Uint8Array,
+function createOptiFrameHeader(
+  version: number,
   sequence: number,
   total: number,
-  bitsPerCell: OptiFrameDensity,
-  version: number,
-  levels: readonly number[],
+  payloadLength: number,
 ) {
-  const capacity = getOptiFrameCapacityForBits(bitsPerCell);
-  if (payload.length > capacity) throw new Error('OptiFrame payload is too large.');
-  if (!Number.isInteger(sequence) || sequence < 0 || sequence > 65535 || !Number.isInteger(total) || total < 1 || total > 65535) {
+  if (
+    !Number.isInteger(sequence) ||
+    sequence < 0 ||
+    sequence > 65535 ||
+    !Number.isInteger(total) ||
+    total < 1 ||
+    total > 65535
+  ) {
     throw new Error('OptiFrame metadata is out of range.');
   }
 
@@ -145,98 +146,41 @@ function rasterizeOptiFrameWithDensity(
   header[3] = (sequence >>> 4) & 255;
   header[4] = ((sequence & 0x0f) << 4) | ((total >>> 12) & 0x0f);
   header[5] = (total >>> 4) & 255;
-  header[6] = ((total & 0x0f) << 4) | ((payload.length >>> 12) & 0x0f);
-  header[7] = (payload.length >>> 4) & 255;
-  header[8] = (payload.length & 0x0f) << 4;
-
-  const body = new Uint8Array(payload.length + 4);
-  body.set(payload);
-  const crc = crc32(payload);
-  body[payload.length] = crc >>> 24;
-  body[payload.length + 1] = crc >>> 16;
-  body[payload.length + 2] = crc >>> 8;
-  body[payload.length + 3] = crc;
-
-  const pixels = new Uint8ClampedArray(OPTIFRAME_SIZE * OPTIFRAME_SIZE * 4);
-  pixels.fill(255);
-
-  for (const coord of FINDER_CELL_COORDS) {
-    const r = coord >>> 8;
-    const col = coord & 255;
-    const i = (r * OPTIFRAME_SIZE + col) * 4;
-    const origin = zoneOrigin(r, col)!;
-    const level = finderBit(r - origin[0], col - origin[1]) ? levels.length - 1 : 0;
-    const lum = levels[level];
-    pixels[i] = lum;
-    pixels[i + 1] = lum;
-    pixels[i + 2] = lum;
-    pixels[i + 3] = 255;
-  }
-
-  let cursor = 0;
-  for (const coord of DATA_CELL_COORDS) {
-    const r = coord >>> 8;
-    const col = coord & 255;
-    const i = (r * OPTIFRAME_SIZE + col) * 4;
-    let level: number;
-
-    if (cursor < HEADER_BITS) {
-      const byte = header[cursor >>> 3];
-      level = bitsPerCell === 2
-        ? (byte >>> (6 - (cursor & 7))) & 3
-        : (byte >>> (4 - (cursor & 4))) & 15;
-    } else {
-      const bodyBit = cursor - HEADER_BITS;
-      const byte = body[bodyBit >>> 3];
-      level = bitsPerCell === 2
-        ? (byte >>> (6 - (bodyBit & 7))) & 3
-        : (byte >>> (4 - (bodyBit & 4))) & 15;
-    }
-
-    const lum = levels[Math.min(level, levels.length - 1)];
-    pixels[i] = lum;
-    pixels[i + 1] = lum;
-    pixels[i + 2] = lum;
-    pixels[i + 3] = 255;
-    cursor += bitsPerCell;
-  }
-
-  return { width: OPTIFRAME_SIZE, height: OPTIFRAME_SIZE, pixels };
+  header[6] = ((total & 0x0f) << 4) | ((payloadLength >>> 12) & 0x0f);
+  header[7] = (payloadLength >>> 4) & 255;
+  header[8] = (payloadLength & 0x0f) << 4;
+  return header;
 }
 
-export type OptiFrameDensity = 2 | 4;
-
-export function getOptiFrameDensityCapacity(bitsPerCell: OptiFrameDensity) {
-  const bits = Math.max(1, bitsPerCell);
-  return Math.max(0, Math.floor((capacityBits() * bits) / 8) - 4);
+function writePackedSymbol(
+  out: Uint8Array,
+  cursorBits: number,
+  symbol: number,
+  bitsPerCell: OptiFrameDensity,
+) {
+  for (let bit = 0; bit < bitsPerCell; bit += 1) {
+    const absoluteBit = cursorBits + bit;
+    const byteIndex = absoluteBit >>> 3;
+    const shift = 7 - (absoluteBit & 7);
+    if ((symbol >>> (bitsPerCell - 1 - bit)) & 1) out[byteIndex] |= 1 << shift;
+  }
 }
 
-export function rasterizeOptiFrameWithDensity(
+function rasterizeOptiFrameWithDensity(
   payload: Uint8Array,
   sequence = 0,
   total = 1,
   bitsPerCell: OptiFrameDensity = 2,
   version = HEADER_VERSION,
-  luminanceLevels = LUMINANCE_LEVELS,
+  luminanceLevels: readonly number[] = LUMINANCE_LEVELS,
 ) {
-  const capacity = getOptiFrameDensityCapacity(bitsPerCell);
+  const capacity = getOptiFrameCapacityForBits(bitsPerCell);
   if (payload.length > capacity) throw new Error('OptiFrame payload is too large for this density.');
-  if (!Number.isInteger(sequence) || sequence < 0 || sequence > 65535 || !Number.isInteger(total) || total < 1 || total > 65535) {
-    throw new Error('OptiFrame metadata is out of range.');
+  if (luminanceLevels.length < (1 << bitsPerCell)) {
+    throw new Error('OptiFrame density requires a complete luminance alphabet.');
   }
 
-  const headerBytes = 9;
-  const header = new Uint8Array(headerBytes);
-  header[0] = MAGIC >>> 8;
-  header[1] = MAGIC & 255;
-  header[2] = (version << 4) | ((sequence >>> 12) & 0x0f);
-  header[3] = (sequence >>> 4) & 255;
-  header[4] = ((sequence & 0x0f) << 4) | ((total >>> 12) & 0x0f);
-  header[5] = (total >>> 4) & 255;
-  header[6] = ((total & 0x0f) << 4) | ((payload.length >>> 12) & 0x0f);
-  header[7] = (payload.length >>> 4) & 255;
-  header[8] = (payload.length & 0x0f) << 4;
-
+  const header = createOptiFrameHeader(version, sequence, total, payload.length);
   const body = new Uint8Array(payload.length + 4);
   body.set(payload);
   const crc = crc32(payload);
@@ -245,46 +189,59 @@ export function rasterizeOptiFrameWithDensity(
   body[payload.length + 2] = crc >>> 8;
   body[payload.length + 3] = crc;
 
+  const totalPackedBytes = Math.ceil((DATA_CELL_COORDS.length * bitsPerCell) / 8);
+  const packed = new Uint8Array(totalPackedBytes);
+
+  for (let bit = 0; bit < HEADER_BITS; bit += 1) {
+    const value = (header[bit >>> 3] >>> (7 - (bit & 7))) & 1;
+    writePackedSymbol(packed, bit, value, 1);
+  }
+
+  const bodyStartBit = HEADER_BITS;
+  for (let bodyBit = 0; bodyBit < body.length * 8; bodyBit += bitsPerCell) {
+    let symbol = 0;
+    const available = Math.min(bitsPerCell, body.length * 8 - bodyBit);
+    for (let bit = 0; bit < available; bit += 1) {
+      const absoluteBit = bodyBit + bit;
+      symbol = (symbol << 1) | ((body[absoluteBit >>> 3] >>> (7 - (absoluteBit & 7))) & 1);
+    }
+    symbol <<= bitsPerCell - available;
+    writePackedSymbol(packed, bodyStartBit + bodyBit, symbol, bitsPerCell);
+  }
+
   const pixels = new Uint8ClampedArray(OPTIFRAME_SIZE * OPTIFRAME_SIZE * 4);
   pixels.fill(255);
 
   for (const coord of FINDER_CELL_COORDS) {
-    const r = coord >>> 8;
+    const row = coord >>> 8;
     const col = coord & 255;
-    const i = (r * OPTIFRAME_SIZE + col) * 4;
-    const origin = zoneOrigin(r, col)!;
-    const level = finderBit(r - origin[0], col - origin[1]) ? luminanceLevels.length - 1 : 0;
-    const lum = luminanceLevels[level];
-    pixels[i] = lum;
-    pixels[i + 1] = lum;
-    pixels[i + 2] = lum;
-    pixels[i + 3] = 255;
+    const index = (row * OPTIFRAME_SIZE + col) * 4;
+    const origin = zoneOrigin(row, col)!;
+    const level = finderBit(row - origin[0], col - origin[1]) ? luminanceLevels.length - 1 : 0;
+    const luminance = luminanceLevels[level];
+    pixels[index] = luminance;
+    pixels[index + 1] = luminance;
+    pixels[index + 2] = luminance;
+    pixels[index + 3] = 255;
   }
 
   let cursorBits = 0;
   for (const coord of DATA_CELL_COORDS) {
-    const r = coord >>> 8;
+    const row = coord >>> 8;
     const col = coord & 255;
-    const i = (r * OPTIFRAME_SIZE + col) * 4;
+    const index = (row * OPTIFRAME_SIZE + col) * 4;
     let symbol = 0;
-    if (cursorBits < HEADER_BITS) {
-      const bit = cursorBits;
-      const headerBit = (header[bit >>> 3] >>> (7 - (bit & 7))) & 1;
-      symbol = headerBit;
-      cursorBits += 1;
-    } else {
-      const bodyBit = cursorBits - HEADER_BITS;
-      const bits = Math.min(bitsPerCell, body.length * 8 - bodyBit);
-      for (let b = 0; b < bits; b += 1) {
-        symbol = (symbol << 1) | ((body[(bodyBit + b) >>> 3] >>> (7 - ((bodyBit + b) & 7))) & 1);
-      }
-      cursorBits += bits;
+    for (let bit = 0; bit < bitsPerCell; bit += 1) {
+      const absoluteBit = cursorBits + bit;
+      const packedByte = packed[absoluteBit >>> 3] ?? 0;
+      symbol = (symbol << 1) | ((packedByte >>> (7 - (absoluteBit & 7))) & 1);
     }
-    const lum = luminanceLevels[Math.min(luminanceLevels.length - 1, symbol)];
-    pixels[i] = lum;
-    pixels[i + 1] = lum;
-    pixels[i + 2] = lum;
-    pixels[i + 3] = 255;
+    const luminance = luminanceLevels[Math.min(luminanceLevels.length - 1, symbol)];
+    pixels[index] = luminance;
+    pixels[index + 1] = luminance;
+    pixels[index + 2] = luminance;
+    pixels[index + 3] = 255;
+    cursorBits += bitsPerCell;
   }
 
   return { width: OPTIFRAME_SIZE, height: OPTIFRAME_SIZE, pixels };
@@ -382,7 +339,19 @@ function decodePackedFrame(packed: Uint8Array) {
   return decodePackedFrameWithConfig(packed, HEADER_VERSION, OPTIFRAME_MAX_PAYLOAD);
 }
 
-function packCellsIntoBytes(
+function readPackedSymbol(
+  data: Uint8ClampedArray,
+  width: number,
+  row: number,
+  col: number,
+  bitsPerCell: OptiFrameDensity,
+) {
+  const index = (row * width + col) * 4;
+  const value = (data[index] + data[index + 1] + data[index + 2]) / 3;
+  return value;
+}
+
+function unpackImageSymbols(
   image: ImageData,
   bitsPerCell: OptiFrameDensity,
   quantizer: (value: number) => number,
@@ -390,29 +359,32 @@ function packCellsIntoBytes(
   maxPayload: number,
 ) {
   if (image.width !== OPTIFRAME_SIZE || image.height !== OPTIFRAME_SIZE) return null;
-  const packed = new Uint8Array(9 + Math.ceil((capacityBits(bitsPerCell) + 7) / 8));
+
+  const packed = new Uint8Array(Math.ceil((DATA_CELL_COORDS.length * bitsPerCell) / 8));
   let cursorBits = 0;
-
   for (const coord of DATA_CELL_COORDS) {
-    const r = coord >>> 8;
+    const row = coord >>> 8;
     const col = coord & 255;
-    const i = (r * OPTIFRAME_SIZE + col) * 4;
-    const value = (image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3;
-    const level = quantizer(value);
-    const byteIndex = cursorBits >>> 3;
-
-    if (bitsPerCell === 2) {
-      packed[byteIndex] = ((packed[byteIndex] << 2) | (level & 3)) & 255;
-    } else if ((cursorBits & 7) === 0) {
-      packed[byteIndex] = (level & 15) << 4;
-    } else {
-      packed[byteIndex] |= level & 15;
+    const value = readPackedSymbol(image.data, image.width, row, col, bitsPerCell);
+    const symbol = quantizer(value);
+    for (let bit = 0; bit < bitsPerCell; bit += 1) {
+      if ((symbol >>> (bitsPerCell - 1 - bit)) & 1) {
+        const absoluteBit = cursorBits + bit;
+        packed[absoluteBit >>> 3] |= 1 << (7 - (absoluteBit & 7));
+      }
     }
-
     cursorBits += bitsPerCell;
   }
 
   return decodePackedFrameWithConfig(packed, expectedVersion, maxPayload);
+}
+
+function decodeAxisAlignedImage(image: ImageData) {
+  return unpackImageSymbols(image, 2, quantize, HEADER_VERSION, OPTIFRAME_MAX_PAYLOAD);
+}
+
+function decodeAxisAlignedImageDense4(image: ImageData) {
+  return unpackImageSymbols(image, 4, quantizeDense4, DENSE4_VERSION, getOptiFrameDense4Capacity());
 }
 
 function quantizeDense4(value: number) {
@@ -851,7 +823,7 @@ function decodePerspectiveFromAnchors(
   const shortest = Math.max(1, Math.min(topWidth, bottomWidth, leftHeight, rightHeight));
   if (longest / shortest > 2.75) return null;
 
-  const packed = new Uint8Array(9 + Math.ceil((capacityBits(bitsPerCell) + 7) / 8));
+  const packed = new Uint8Array(Math.ceil((DATA_CELL_COORDS.length * bitsPerCell) / 8));
   let cursorBits = 0;
   for (const coord of DATA_CELL_COORDS) {
     const r = coord >>> 8;
@@ -859,19 +831,18 @@ function decodePerspectiveFromAnchors(
     const [sx, sy] = project(reverse, col, r);
     if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) return null;
     const raw = sampleModule(image, sx, sy, moduleScale);
-    const normalized = Math.max(0, Math.min(255, (raw - calibration.dark) * 255 / (calibration.light - calibration.dark)));
+    const normalized = Math.max(
+      0,
+      Math.min(255, (raw - calibration.dark) * 255 / (calibration.light - calibration.dark)),
+    );
     const level = bitsPerCell === 2 ? quantize(normalized) : quantizeDense4(normalized);
-    const byteIndex = cursorBits >>> 3;
-    if (bitsPerCell === 2) {
-      packed[byteIndex] = ((packed[byteIndex] << 2) | level) & 255;
-    } else if ((cursorBits & 7) === 0) {
-      packed[byteIndex] = (level & 15) << 4;
-    } else {
-      packed[byteIndex] |= level & 15;
+    for (let bit = 0; bit < bitsPerCell; bit += 1) {
+      if ((level >>> (bitsPerCell - 1 - bit)) & 1) {
+        packed[cursorBits >>> 3] |= 1 << (7 - (cursorBits & 7));
+      }
+      cursorBits += 1;
     }
-    cursorBits += bitsPerCell;
   }
-  return decodePackedFrameWithConfig(packed, expectedVersion, maxPayload);
 }
 
 function solveHomography(
