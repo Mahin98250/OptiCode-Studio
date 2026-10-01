@@ -1,4 +1,4 @@
-import { rasterizeOptiFrame } from '../lib/optiframe';
+import { rasterizeOptiFrame, rasterizeOptiFrameDense4, type OptiFrameDensity } from '../lib/optiframe';
 import { getOptiLaneLayout } from '../lib/optiframeLanes';
 import type { OptiLaneCount } from '../lib/optiframeLanes';
 
@@ -8,6 +8,7 @@ type Request = {
   baseSequence: number;
   total: number;
   laneCount: OptiLaneCount;
+  densityBits: OptiFrameDensity;
   payloads: ArrayBuffer[];
 };
 
@@ -30,7 +31,7 @@ function getRenderScale(laneCount: OptiLaneCount) {
 }
 
 scope.onmessage = async (event) => {
-  const { id, key, baseSequence, total, laneCount, payloads } = event.data;
+  const { id, key, baseSequence, total, laneCount, densityBits, payloads } = event.data;
   try {
     if (typeof OffscreenCanvas === 'undefined') throw new Error('OffscreenCanvas unavailable.');
 
@@ -53,7 +54,7 @@ scope.onmessage = async (event) => {
     for (let lane = 0; lane < laneCount; lane += 1) {
       const buffer = payloads[lane];
       if (!buffer) continue;
-      const raster = rasterizeOptiFrame(
+      const raster = (densityBits === 4 ? rasterizeOptiFrameDense4 : rasterizeOptiFrame)(
         new Uint8Array(buffer),
         total > 0 ? (baseSequence + lane) % total : baseSequence + lane,
         total,
