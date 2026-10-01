@@ -156,7 +156,7 @@ function writePackedSymbol(
   out: Uint8Array,
   cursorBits: number,
   symbol: number,
-  bitsPerCell: OptiFrameDensity,
+  bitsPerCell: number,
 ) {
   for (let bit = 0; bit < bitsPerCell; bit += 1) {
     const absoluteBit = cursorBits + bit;
