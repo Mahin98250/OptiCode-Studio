@@ -1037,6 +1037,55 @@ export function decodeOptiFramePerspectiveDense4(
   );
 }
 
+export function decodeOptiFramePerspectiveAuto(
+  source: CanvasImageSource | ImageData,
+  previousAnchors: PerspectiveAnchorSet | null = null,
+): { frame: OptiFrame; diagnostics: OptiFramePerspectiveDiagnostics } | null {
+  const started = performance.now();
+  const image = toImageData(source);
+  if (!image) return null;
+
+  let anchors: PerspectiveAnchorSet | null = null;
+  if (previousAnchors) {
+    const tracked = previousAnchors.map(anchor => searchFinderNear(image, anchor));
+    if (tracked.every(Boolean)) {
+      anchors = [tracked[0]!, tracked[1]!, tracked[2]!, tracked[3]!];
+    }
+  }
+
+  if (!anchors) {
+    const all = searchAllFinders(image);
+    if (!all.tl || !all.tr || !all.bl || !all.br) return null;
+    anchors = [all.tl, all.tr, all.bl, all.br];
+  }
+
+  const sparse = decodePerspectiveFromAnchors(
+    image,
+    anchors,
+    2,
+    HEADER_VERSION,
+    OPTIFRAME_MAX_PAYLOAD,
+  );
+  if (sparse) {
+    sparse.diagnostics.decodeMs = performance.now() - started;
+    return sparse;
+  }
+
+  const dense = decodePerspectiveFromAnchors(
+    image,
+    anchors,
+    4,
+    DENSE4_VERSION,
+    getOptiFrameDense4Capacity(),
+  );
+  if (dense) {
+    dense.diagnostics.decodeMs = performance.now() - started;
+    return dense;
+  }
+
+  return null;
+}
+
 export function optiFrameSelfTest() {
   const payload = new TextEncoder().encode('OptiCode experimental optical frame');
   const encoded = encodeOptiFrame(payload, 7, 19);
