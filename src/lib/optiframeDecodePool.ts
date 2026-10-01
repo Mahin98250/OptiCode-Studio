@@ -146,21 +146,24 @@ export class OptiFrameDecodePool {
 
     const queue = jobs.map((job, index) => ({ ...job, index }));
     const runnerCount = Math.min(this.capacity, jobs.length);
+    let cursor = 0;
 
     const run = async () => {
-      while (queue.length > 0) {
+      while (cursor < queue.length) {
         // If every worker has failed while a batch is in flight, stop the
         // scheduler instead of retrying forever and hanging the receiver.
         if (this.capacity === 0) return;
 
-        const item = queue.shift();
+        const item = queue[cursor];
+        cursor += 1;
         if (!item) return;
 
-        const job = this.decode(item.buffer, item.width, item.height, item.previousAnchors ?? null);
-        if (!job) {
-          queue.unshift(item);
+        let job: Promise<OptiFrameWorkerResult | null> | null = null;
+        while (!job) {
+          job = this.decode(item.buffer, item.width, item.height, item.previousAnchors ?? null);
+          if (job) break;
+          if (this.capacity === 0) return;
           await new Promise<void>(resolve => globalThis.setTimeout(resolve, 0));
-          continue;
         }
 
         try {
