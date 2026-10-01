@@ -23,7 +23,7 @@ export function getOptiLaneSequence(baseSequence: number, lane: number, total: n
 }
 
 export type OptiFrameCanvasCache = {
-  get(payload: Uint8Array, sequence: number, total: number): HTMLCanvasElement;
+  get(payload: Uint8Array, sequence: number, total: number, densityBits?: OptiFrameDensity): HTMLCanvasElement;
   clear(): void;
   size(): number;
 };
@@ -32,7 +32,7 @@ export function createOptiFrameCanvasCache(maxEntries = 96): OptiFrameCanvasCach
   const limit = Math.max(1, Math.floor(maxEntries));
   const entries = new Map<string, HTMLCanvasElement>();
 
-  const payloadKey = (payload: Uint8Array, sequence: number, total: number) => {
+  const payloadKey = (payload: Uint8Array, sequence: number, total: number, densityBits: OptiFrameDensity) => {
     // Sequence alone is not a valid cache key: different lanes can reuse the
     // same sequence while carrying different payloads. Encode the complete
     // payload into the key so a reused sequence can never return another
@@ -41,12 +41,12 @@ export function createOptiFrameCanvasCache(maxEntries = 96): OptiFrameCanvasCach
     for (let i = 0; i < payload.length; i += 0x8000) {
       binary += String.fromCharCode(...payload.subarray(i, Math.min(i + 0x8000, payload.length)));
     }
-    return sequence + ':' + total + ':' + btoa(binary);
+    return sequence + ':' + total + ':' + densityBits + ':' + btoa(binary);
   };
 
   return {
-    get(payload, sequence, total) {
-      const key = payloadKey(payload, sequence, total);
+    get(payload, sequence, total, densityBits = 2) {
+      const key = payloadKey(payload, sequence, total, densityBits);
       const cached = entries.get(key);
       if (cached) {
         entries.delete(key);
@@ -54,7 +54,9 @@ export function createOptiFrameCanvasCache(maxEntries = 96): OptiFrameCanvasCach
         return cached;
       }
 
-      const encoded = encodeOptiFrame(payload, sequence, total);
+      const encoded = densityBits === 4
+        ? encodeOptiFrameDense4(payload, sequence, total)
+        : encodeOptiFrame(payload, sequence, total);
       entries.set(key, encoded.canvas);
       while (entries.size > limit) {
         const oldest = entries.keys().next().value as string | undefined;
@@ -106,7 +108,7 @@ export function createOptiLaneSurface(
     const canvas = densityBits === 4
       ? encodeOptiFrameDense4(payloads[lane], sequence, total).canvas
       : frameCache
-        ? frameCache.get(payloads[lane], sequence, total)
+        ? frameCache.get(payloads[lane], sequence, total, densityBits)
         : encodeOptiFrame(payloads[lane], sequence, total).canvas;
     frames.push({
       version: densityBits === 4 ? 3 : 2,
