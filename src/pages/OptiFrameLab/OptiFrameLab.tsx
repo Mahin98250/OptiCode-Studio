@@ -310,6 +310,7 @@ export function OptiFrameLab() {
           opticalFountainPlan ? 'fountain' : 'frames',
           nextGroup,
         ].join(':');
+        if (surfacePoolRef.current.has(key)) continue;
         surfacePoolRef.current.request(
           key,
           nextGroup,
