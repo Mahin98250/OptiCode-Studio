@@ -47,7 +47,7 @@ export function createAdaptiveTransmission(initialIntervalMs = 80, config: Adapt
       const generationPressure = (metrics.generationMs ?? 0) > frameBudget;
       const channelPressure = successRate < limits.targetSuccessRate || dropRate > limits.targetDropRate;
 
-      if (renderPressure || channelPressure) {
+      if (renderPressure || generationPressure || channelPressure) {
         // One bad sample is enough to react, but repeated pressure is
         // deliberately bounded so noisy camera reads cannot ratchet cadence
         // all the way to the maximum interval in a few frames.
