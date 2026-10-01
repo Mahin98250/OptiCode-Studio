@@ -1078,19 +1078,33 @@ export function decodeOptiFramePerspectiveAuto(
       );
 
   const firstDensity: OptiFrameDensity = preferredPerspectiveDensity ?? 2;
+  const makeResult = (frame: OptiFrame) => ({
+    frame,
+    diagnostics: {
+      anchors: [anchors![0], anchors![1], anchors![2], anchors![3]] as [
+        OptiFrameAnchor,
+        OptiFrameAnchor,
+        OptiFrameAnchor,
+        OptiFrameAnchor,
+      ],
+      confidence: anchors!.reduce((sum, anchor) => sum + anchor.score, 0) / anchors!.length,
+      sampleWidth: image.width,
+      sampleHeight: image.height,
+      decodeMs: performance.now() - started,
+    },
+  });
+
   const first = tryDecode(firstDensity);
   if (first) {
     preferredPerspectiveDensity = firstDensity;
-    first.diagnostics.decodeMs = performance.now() - started;
-    return first;
+    return makeResult(first);
   }
 
   const secondDensity: OptiFrameDensity = firstDensity === 2 ? 4 : 2;
   const second = tryDecode(secondDensity);
   if (second) {
     preferredPerspectiveDensity = secondDensity;
-    second.diagnostics.decodeMs = performance.now() - started;
-    return second;
+    return makeResult(second);
   }
 
   return null;
