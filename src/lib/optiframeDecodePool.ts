@@ -32,6 +32,7 @@ type PoolWorker = {
 export class OptiFrameDecodePool {
   private readonly workers: PoolWorker[] = [];
   private readonly pending = new Map<number, Pending>();
+  private readonly availabilityWaiters = new Set<() => void>();
   private nextId = 1;
 
   constructor(
@@ -56,6 +57,7 @@ export class OptiFrameDecodePool {
           this.pending.delete(event.data.id);
           const slot = this.workers[pending.workerIndex];
           if (slot) slot.busy = false;
+          this.notifyAvailable();
 
           if (!event.data.ok || !event.data.frame || !event.data.diagnostics) {
             pending.resolve(null);
@@ -74,6 +76,7 @@ export class OptiFrameDecodePool {
           poolWorker.failed = true;
           poolWorker.busy = false;
           worker.terminate();
+          this.notifyAvailable();
           for (const [id, pending] of this.pending) {
             if (pending.workerIndex !== index) continue;
             this.pending.delete(id);
@@ -131,6 +134,29 @@ export class OptiFrameDecodePool {
     });
   }
 
+  private notifyAvailable() {
+    if (!this.available) return;
+    const waiters = [...this.availabilityWaiters];
+    this.availabilityWaiters.clear();
+    for (const resolve of waiters) resolve();
+  }
+
+  private waitForAvailable() {
+    if (this.available || this.capacity === 0) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      this.availabilityWaiters.add(resolve);
+      // Close the small check/register race where a worker can finish between
+      // the availability check and insertion into the waiter set.
+      if (this.available) {
+        this.availabilityWaiters.delete(resolve);
+        resolve();
+      } else if (this.capacity === 0) {
+        this.availabilityWaiters.delete(resolve);
+        resolve();
+      }
+    });
+  }
+
   async decodeBatch(
     jobs: Array<{
       buffer: ArrayBuffer;
@@ -163,7 +189,7 @@ export class OptiFrameDecodePool {
           job = this.decode(item.buffer, item.width, item.height, item.previousAnchors ?? null);
           if (job) break;
           if (this.capacity === 0) return;
-          await new Promise<void>(resolve => globalThis.setTimeout(resolve, 0));
+          await this.waitForAvailable();
         }
 
         try {
@@ -185,5 +211,6 @@ export class OptiFrameDecodePool {
     }
     this.pending.clear();
     this.workers.length = 0;
+    this.notifyAvailable();
   }
 }
