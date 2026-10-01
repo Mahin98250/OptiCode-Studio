@@ -99,6 +99,7 @@ export class OptiFrameSurfacePool {
     laneCount: OptiLaneCount,
     payloads: readonly Uint8Array[],
     densityBits: OptiFrameDensity = 2,
+    transferPayloadOwnership = false,
   ) {
     if (this.capacity === 0 || payloads.length !== laneCount) return false;
     if (this.ready.has(key) || [...this.pending.values()].some(job => job.key === key) || this.queue.some(job => job.key === key)) {
@@ -113,7 +114,13 @@ export class OptiFrameSurfacePool {
       total,
       laneCount,
       densityBits,
-      payloads: payloads.map(payload => payload.slice().buffer),
+      payloads: payloads.map(payload =>
+        transferPayloadOwnership &&
+        payload.byteOffset === 0 &&
+        payload.byteLength === payload.buffer.byteLength
+          ? payload.buffer
+          : payload.slice().buffer,
+      ),
     };
     this.queue.push(job);
     this.dispatch();
