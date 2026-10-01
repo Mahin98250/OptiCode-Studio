@@ -332,7 +332,10 @@ function decodePackedFrameWithConfig(
   const payloadStart = 9;
   const end = payloadStart + length + 4;
   if (end > packed.length) return null;
-  const payload = packed.slice(payloadStart, payloadStart + length);
+  // packed is decoder-owned and freshly allocated; a view avoids another
+  // payload-sized allocation while retaining the backing buffer through the
+  // returned Uint8Array.
+  const payload = packed.subarray(payloadStart, payloadStart + length);
   const expected = (
     (packed[payloadStart + length] << 24) |
     (packed[payloadStart + length + 1] << 16) |
