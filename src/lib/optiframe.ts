@@ -462,8 +462,19 @@ function expectedFinderLuma(r: number, c: number) {
   return finderBit(r, c) ? 1 : 0;
 }
 
+const FINDER_EXPECTED = new Float64Array(FINDER_SIZE * FINDER_SIZE);
+const FINDER_WEIGHTS = new Float64Array(FINDER_SIZE * FINDER_SIZE);
+const FINDER_VALUES = new Float64Array(FINDER_SIZE * FINDER_SIZE);
+for (let r = 0; r < FINDER_SIZE; r += 1) {
+  for (let c = 0; c < FINDER_SIZE; c += 1) {
+    const index = r * FINDER_SIZE + c;
+    const isLight = finderBit(r, c);
+    FINDER_EXPECTED[index] = isLight ? 1 : 0;
+    FINDER_WEIGHTS[index] = isLight ? 1.1 : 1.65;
+  }
+}
+
 function finderScore(image: ImageData, cx: number, cy: number, moduleScale: number, angle = 0) {
-  const points: Array<{ value: number; expected: number; weight: number }> = [];
   const half = (FINDER_SIZE - 1) / 2;
   const radians = angle * Math.PI / 180;
   const cos = Math.cos(radians);
@@ -471,26 +482,29 @@ function finderScore(image: ImageData, cx: number, cy: number, moduleScale: numb
   let min = 255;
   let max = 0;
 
-  for (let r = 0; r < FINDER_SIZE; r++) {
-    for (let c = 0; c < FINDER_SIZE; c++) {
+  for (let r = 0; r < FINDER_SIZE; r += 1) {
+    for (let c = 0; c < FINDER_SIZE; c += 1) {
+      const index = r * FINDER_SIZE + c;
       const dx = (c - half) * moduleScale;
       const dy = (r - half) * moduleScale;
       const x = cx + dx * cos - dy * sin;
       const y = cy + dx * sin + dy * cos;
       const value = bilinear(image, x, y);
-      min = Math.min(min, value);
-      max = Math.max(max, value);
-      points.push({ value, expected: expectedFinderLuma(r, c), weight: finderBit(r, c) ? 1.1 : 1.65 });
+      FINDER_VALUES[index] = value;
+      if (value < min) min = value;
+      if (value > max) max = value;
     }
   }
 
   if (max - min < 55) return -1;
+  const span = max - min;
   let error = 0;
   let weight = 0;
-  for (const point of points) {
-    const normalized = (point.value - min) / (max - min);
-    error += Math.abs(normalized - point.expected) * point.weight;
-    weight += point.weight;
+  for (let index = 0; index < FINDER_VALUES.length; index += 1) {
+    const normalized = (FINDER_VALUES[index] - min) / span;
+    const pointWeight = FINDER_WEIGHTS[index];
+    error += Math.abs(normalized - FINDER_EXPECTED[index]) * pointWeight;
+    weight += pointWeight;
   }
   return 1 - error / weight;
 }
