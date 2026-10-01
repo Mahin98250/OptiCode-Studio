@@ -99,10 +99,18 @@ type OpticalTrack = {
 };
 
 function getDisplayLaneCount() {
-  if (typeof window === 'undefined') return 4;
+  if (typeof window === 'undefined') return 1;
+
+  // Physical camera tests work better when the sender dedicates the whole
+  // surface to a single QR on touch devices. Multiple small QR regions reduce
+  // finder-module size and make phone/tablet acquisition fragile.
+  const touchDevice = navigator.maxTouchPoints > 0
+    || window.matchMedia?.('(pointer: coarse)').matches === true;
+  if (touchDevice) return 1;
+
   const width = Math.min(window.innerWidth, window.screen?.width || window.innerWidth);
-  if (width < 640) return 1;
-  if (width < 960) return 2;
+  if (width < 1200) return 1;
+  if (width < 1800) return 2;
   return 4;
 }
 
@@ -2334,6 +2342,16 @@ export function Transfer() {
           <button onClick={()=>{stopPlayback();setMode('fountain');setFountain(null);setCompat(null);setFile(null);}} className={`rounded-xl px-3 py-3 text-xs font-bold ${mode==='fountain'?'bg-cyan-300 text-slate-950':'text-[var(--text-muted)]'}`}>Faster sharing</button>
           <button onClick={()=>{stopPlayback();setMode('compatibility');setFountain(null);setCompat(null);setFile(null);}} className={`rounded-xl px-3 py-3 text-xs font-bold ${mode==='compatibility'?'bg-white text-slate-950':'text-[var(--text-muted)]'}`}>Simple sharing</button>
         </div>
+        <div className="mt-4 rounded-[22px] border border-cyan-300/20 bg-cyan-300/[.06] p-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-xl bg-cyan-300/15 p-2 text-cyan-200"><Radio size={16}/></div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-black text-cyan-100">Physical high-speed mode</p>
+              <p className="mt-1 text-[10px] leading-5 text-[var(--text-muted)]">For phone-to-phone or tablet-to-phone transfer, use the native OptiFrame surface: one large optical frame instead of multiple tiny QR codes.</p>
+              <Link to="/optiframe" className="mt-2 inline-flex rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-950">Open OptiFrame transfer →</Link>
+            </div>
+          </div>
+        </div>
         <input ref={inputRef} type="file" className="sr-only" onChange={e=>{void choose(e.target.files?.[0]);e.currentTarget.value='';}}/>
         <button onClick={()=>inputRef.current?.click()} className="mt-4 w-full rounded-[24px] border border-dashed border-cyan-300/30 bg-cyan-300/[.05] p-8 text-center"><FileUp className="mx-auto text-cyan-300" size={30}/><p className="mt-3 font-bold">Choose any file</p><p className="mt-1 text-xs text-[var(--text-muted)]">{mode==='fountain'?'Up to 512 MB · faster sharing':'Up to 512 MB · simple recovery'}</p></button>
         <button onClick={()=>{const bytes=new Uint8Array(1024*1024);for(let i=0;i<bytes.length;i+=1)bytes[i]=(i*73+(i%251)*29+(i>>>8))&255;void choose(new File([bytes],'opticode-1mb-benchmark.bin',{type:'application/octet-stream'}));}} className="mt-3 w-full rounded-2xl border border-cyan-300/15 bg-white/5 p-3 text-left"><p className="text-xs font-black text-cyan-200">Sharing speed test</p><p className="mt-1 text-[10px] leading-5 text-[var(--text-muted)]">A small test file to check how quickly your devices can share a file.</p></button>
@@ -2365,7 +2383,7 @@ export function Transfer() {
           </div>
         </div>}
         {(fountain||compat)&&<div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Automatic speed<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On</option><option value="off">Off</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Sharing speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="16">60 FPS</option><option value="24">50 FPS</option><option value="35">Very fast</option><option value="45">Fast</option><option value="60">Balanced</option><option value="90">Reliable</option><option value="150">Extra reliable</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Behind the scenes</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/{getRenderPrefetchWindow()} groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Screen update</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>File per screen</b><p className="mt-1 text-[var(--text-muted)]">{fountain ? FOUNTAIN_BLOCK_BYTES + ' bytes/block' : (compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME) + ' raw bytes/frame · 1× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Codes on screen</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · The app chooses the screen layout automatically.</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Missed parts</b><p className="mt-1 text-[var(--text-muted)]">{fountain?'Extra recovery':'Simple sharing'}</p></div></div>}
+          <label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Automatic speed<select value={autoTune?'on':'off'} onChange={e=>setAutoTune(e.target.value==='on')} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="on">On</option><option value="off">Off</option></select></label><label className="rounded-xl bg-white/5 p-3 text-xs font-bold">Sharing speed<select value={intervalMs} onChange={e=>setIntervalMs(Number(e.target.value))} className="mt-2 w-full rounded-lg bg-black/20 p-2 text-xs"><option value="16">60 FPS</option><option value="24">50 FPS</option><option value="35">Very fast</option><option value="45">Fast</option><option value="60">Balanced</option><option value="90">Reliable</option><option value="150">Extra reliable</option></select></label><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Behind the scenes</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.encoderWorkers>0?telemetry.encoderWorkers+' worker encoder':'main-thread fallback'} · {telemetry.prefetchReady}/{getRenderPrefetchWindow()} groups ready</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Screen update</b><p className="mt-1 text-[var(--text-muted)]">{telemetry.renderMs.toFixed(1)} ms · QR encode {telemetry.encodeMs.toFixed(1)} ms</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>File per screen</b><p className="mt-1 text-[var(--text-muted)]">{fountain ? FOUNTAIN_BLOCK_BYTES + ' bytes/block' : (compat?.bytesPerFrame ?? OR_TRANSFER_BYTES_PER_FRAME) + ' raw bytes/frame · 1× dwell per frame'}</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Codes on screen</b><p className="mt-1 text-[var(--text-muted)]">{getDisplayLaneCount()} QR code{getDisplayLaneCount() === 1 ? "" : "s"} · Touch devices use one large code for easier physical camera acquisition.</p></div><div className="rounded-xl bg-white/5 p-3 text-xs"><b>Missed parts</b>p className="mt-1 text-[var(--text-muted)]">{fountain?'Extra recovery':'Simple sharing'}</p></div></div>}
         </>}
       </div>
     </div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
