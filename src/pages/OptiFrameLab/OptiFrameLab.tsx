@@ -325,64 +325,91 @@ export function OptiFrameLab() {
     const drawDirect = async (group: number) => {
       if (drawInFlight) return;
       drawInFlight = true;
+      const generationStarted = performance.now();
       try {
-      const key = [
-        opticalFountainPlan?.session ?? 'chunk',
-        laneCount,
-        opticalFountainPlan ? 'fountain' : 'frames',
-        group,
-      ].join(':');
+        const key = [
+          opticalFountainPlan?.session ?? 'chunk',
+          laneCount,
+          opticalFountainPlan ? 'fountain' : 'frames',
+          group,
+        ].join(':');
 
-      let surface = senderSurfaceCacheRef.current.get(key);
-      let workerBitmap = surfacePoolRef.current.take(key);
-      if (!surface && !workerBitmap) {
-        const payloads = await getPayloads(group);
+        let surface = senderSurfaceCacheRef.current.get(key);
+        let workerBitmap = surfacePoolRef.current.take(key);
+        if (!surface && !workerBitmap) {
+          const payloads = await getPayloads(group);
 
-        try {
-          // The direct sender already maintains a rolling group cache.
-          // Skip the payload→Base64 LRU here to reduce allocations in the
-          // highest-rate transmission path.
-          surface = createOptiLaneSurface(
-            payloads,
-            group,
-            streamGroupCount,
-            laneCount,
-            undefined,
-            opticalFountainPlan?.densityBits ?? opticalDensity,
-          ).canvas;
-        } catch {
-          return;
+          try {
+            // The direct sender deliberately skips the Base64 payload cache in
+            // this path; file-backed fountain blocks and in-flight dedupe keep
+            // source reads bounded without hot-path string allocations.
+            surface = createOptiLaneSurface(
+              payloads,
+              group,
+              streamGroupCount,
+              laneCount,
+              undefined,
+              opticalFountainPlan?.densityBits ?? opticalDensity,
+            ).canvas;
+          } catch {
+            return;
+          }
+
+          senderSurfaceCacheRef.current.set(key, surface);
+          while (senderSurfaceCacheRef.current.size > 4) {
+            const oldest = senderSurfaceCacheRef.current.keys().next().value;
+            if (oldest === undefined) break;
+            senderSurfaceCacheRef.current.delete(oldest);
+          }
         }
 
-        senderSurfaceCacheRef.current.set(key, surface);
-        while (senderSurfaceCacheRef.current.size > 4) {
-          const oldest = senderSurfaceCacheRef.current.keys().next().value;
-          if (oldest === undefined) break;
-          senderSurfaceCacheRef.current.delete(oldest);
+        const paint = (target: HTMLCanvasElement | null) => {
+          const source = surface ?? workerBitmap;
+          if (!target || !source) return 0;
+          const started = performance.now();
+          const ctx = target.getContext('2d', { alpha: false, desynchronized: true });
+          if (!ctx) return 0;
+          if (target.width !== source.width) target.width = source.width;
+          if (target.height !== source.height) target.height = source.height;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(source, 0, 0);
+          return performance.now() - started;
+        };
+
+        const renderMs = Math.max(
+          paint(streamCanvasRef.current),
+          paint(presentationCanvasRef.current),
+        );
+        const generationMs = Math.max(0, performance.now() - generationStarted - renderMs);
+
+        workerBitmap?.close();
+        void queueWorkerPrefetch(group);
+
+        const decision = adaptiveTransmissionRef.current.observe({
+          renderMs,
+          generationMs,
+          frameBudgetMs: 1000 / Math.max(1, displayRefreshHz),
+        });
+        if (decision.changed && decision.intervalMs !== streamIntervalMs) {
+          setStreamIntervalMs(decision.intervalMs);
+          setStatus(
+            'Direct optical cadence · ' +
+            decision.intervalMs +
+            ' ms · ' +
+            decision.direction +
+            ' · generation ' +
+            Math.round(generationMs) +
+            ' ms · render ' +
+            Math.round(renderMs) +
+            ' ms.',
+          );
         }
-      }
 
-      const paint = (target: HTMLCanvasElement | null) => {
-        const source = surface ?? workerBitmap;
-        if (!target || !source) return;
-        const ctx = target.getContext('2d', { alpha: false, desynchronized: true });
-        if (!ctx) return;
-        if (target.width !== source.width) target.width = source.width;
-        if (target.height !== source.height) target.height = source.height;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(source, 0, 0);
-      };
-
-      paint(streamCanvasRef.current);
-      paint(presentationCanvasRef.current);
-      workerBitmap?.close();
-      void queueWorkerPrefetch(group);
-
-      const now = performance.now();
-      if (now - senderLastPaintAtRef.current >= 500) {
-        senderLastPaintAtRef.current = now;
-        setStreamIndex(group * laneCount);
-      }
+        const now = performance.now();
+        if (now - senderLastPaintAtRef.current >= 500) {
+          senderLastPaintAtRef.current = now;
+          setStreamIndex(group * laneCount);
+        }
       } finally {
         drawInFlight = false;
       }
@@ -470,37 +497,19 @@ export function OptiFrameLab() {
 
   useEffect(() => {
     const drawSurface = (target: HTMLCanvasElement | null) => {
-      if (!target || !streamSurface) return 0;
-      const started = performance.now();
+      if (!target || !streamSurface) return;
       target.width = streamSurface.width;
       target.height = streamSurface.height;
       const ctx = target.getContext('2d');
-      if (!ctx) return 0;
+      if (!ctx) return;
       ctx.imageSmoothingEnabled = false;
       ctx.clearRect(0, 0, target.width, target.height);
       ctx.drawImage(streamSurface, 0, 0);
-      return performance.now() - started;
     };
 
-    const renderMs = Math.max(
-      drawSurface(streamCanvasRef.current),
-      drawSurface(presentationCanvasRef.current),
-    );
-
-    if (streamPlaying && renderMs > 0) {
-      const decision = adaptiveTransmissionRef.current.observe({ renderMs });
-      if (decision.changed && decision.intervalMs !== streamIntervalMs) {
-        setStreamIntervalMs(decision.intervalMs);
-        setStatus(
-          'Direct optical canvas cadence · ' +
-          decision.intervalMs +
-          ' ms · ' +
-          decision.direction +
-          ' to match rendering load.',
-        );
-      }
-    }
-  }, [streamSurface, streamPlaying, streamIntervalMs]);
+    drawSurface(streamCanvasRef.current);
+    drawSurface(presentationCanvasRef.current);
+  }, [streamSurface]);
 
   function generate() {
     try {
