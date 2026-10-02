@@ -325,6 +325,8 @@ export function Transfer() {
   const guideStableCountRef=useRef(0);
   const guideDetectionStreakRef=useRef(0);
   const guideDistanceRef=useRef<OpticalGuideDiagnostics['distance']>('unknown');
+  const guideLightingRef=useRef<OpticalGuideDiagnostics['lighting']>('unknown');
+  const guideFocusRef=useRef<OpticalGuideDiagnostics['focus']>('unknown');
   const guideMissStreakRef=useRef(0);
   const opticalVisualTargetRef=useRef<OpticalGuideRect|null>(null);
   const opticalVisualCurrentRef=useRef<OpticalGuideRect|null>(null);
@@ -1290,6 +1292,25 @@ export function Transfer() {
     const clippedHighlights=metrics?.clippedHighlights ?? Number.NaN;
     const sharpness=metrics?.sharpness ?? Number.NaN;
 
+    const classifyLighting=():OpticalGuideDiagnostics['lighting']=>{
+      if(!metricsKnown) return 'unknown';
+      const previous=guideLightingRef.current;
+      if(previous==='dark' && brightness<45) return 'dark';
+      if(previous==='glare' && clippedHighlights>.28 && contrast<40) return 'glare';
+      if(brightness<36) return 'dark';
+      if(clippedHighlights>.38 && contrast<32) return 'glare';
+      return 'good';
+    };
+
+    const classifyFocus=():OpticalGuideDiagnostics['focus']=>{
+      if(!metricsKnown) return 'unknown';
+      const previous=guideFocusRef.current;
+      if(previous==='soft' && sharpness<18) return 'soft';
+      if(previous==='good' && sharpness>8) return 'good';
+      if(sharpness>=16 || (edgeEnergy>=10 && contrast>=38)) return 'good';
+      return 'soft';
+    };
+
     const sizeScore=(size:number)=>{
       if(size<=0)return 0;
       if(size<0.18)return Math.max(0,size/0.18);
@@ -1422,7 +1443,7 @@ export function Transfer() {
           setOpticalGuideDiagnostics({
             framing:'good',
             distance:'good',
-            lighting:!metricsKnown?'unknown':brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
+            lighting:!metricsKnown?'unknown':classifyLighting(),
             stability:'moving',
             geometry:'good',
             focus:'unknown',
@@ -1492,6 +1513,9 @@ export function Transfer() {
       const centered=Math.abs(cx-.5)<.10 && Math.abs(cy-.5)<.10;
       const primaryAspect=primary.width/Math.max(1,primary.height);
       const corners=primary.corners && primary.corners.length>=4 ? primary.corners.slice(0,4) : null;
+      const rotationDeg=corners
+        ? (Math.atan2(corners[1].y-corners[0].y,corners[1].x-corners[0].x)*180/Math.PI)
+        : Number.NaN;
       const distanceBetween=(a:{x:number;y:number},b:{x:number;y:number})=>Math.hypot(a.x-b.x,a.y-b.y);
       const perspectiveError=corners
         ? (()=>{
@@ -1518,7 +1542,7 @@ export function Transfer() {
       const cropPenalty=cropped?.12:0;
       const lightingPenalty=!metricsKnown?0:brightness<42?.18:clippedHighlights>.24 && contrast<48?.16:0;
       const sharpEnough=metricsKnown && (
-        sharpness>=10 ||
+        sharpness>=8 ||
         edgeEnergy>=7 ||
         contrast>=34
       );
@@ -1623,12 +1647,11 @@ export function Transfer() {
         :guideStableCountRef.current>=5?'locked':'steady';
       const lighting:OpticalGuideDiagnostics['lighting']=!metricsKnown?'unknown':brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good';
       const framing=centered?'good':'off';
-      const geometry=cropped?'cropped':perspectiveOk?'good':'tilted';
-      const focus:OpticalGuideDiagnostics['focus']=!metricsKnown
-        ?'unknown'
-        :sharpness>=16 || (edgeEnergy>=10 && contrast>=38)
-          ?'good'
-          :'soft';
+      const rotationLarge=Number.isFinite(rotationDeg) && Math.abs(rotationDeg)>10;
+      const geometry=cropped?'cropped':(!perspectiveOk || rotationLarge)?'tilted':'good';
+      const focus=classifyFocus();
+      guideLightingRef.current=lighting;
+      guideFocusRef.current=focus;
 
       setOpticalGuideDiagnostics({framing,distance,lighting,stability,geometry,focus});
 
@@ -1733,7 +1756,7 @@ export function Transfer() {
         setOpticalGuideDiagnostics({
           framing:centered?'good':'off',
           distance:'good',
-          lighting:!metricsKnown?'unknown':brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
+          lighting:!metricsKnown?'unknown':classifyLighting(),
           stability:'moving',
           geometry:'good',
           focus:'unknown',
@@ -1802,6 +1825,8 @@ export function Transfer() {
     setOpticalTrack({confidence:0,predicted:false,ageMs:0});
     setOpticalGuideRect(null);
     guideDistanceRef.current='unknown';
+    guideLightingRef.current='unknown';
+    guideFocusRef.current='unknown';
     setOpticalGuideDiagnostics({framing:'searching',distance:'unknown',lighting:'unknown',stability:'moving',geometry:'searching',focus:'unknown'});
     applyMessage('No QR code detected','No valid QR code has been confirmed in the camera view. Point the camera at the sender screen or QR code.','searching',0);
   };
