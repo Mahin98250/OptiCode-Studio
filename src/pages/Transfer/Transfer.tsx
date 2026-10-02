@@ -1268,6 +1268,8 @@ export function Transfer() {
     contrast:number;
     edgeEnergy:number;
     clippedHighlights:number;
+    sharpness:number;
+    sampledPixels:number;
   };
 
   function updateOpticalGuide(
@@ -1286,6 +1288,7 @@ export function Transfer() {
     const contrast=metrics?.contrast ?? Number.NaN;
     const edgeEnergy=metrics?.edgeEnergy ?? Number.NaN;
     const clippedHighlights=metrics?.clippedHighlights ?? Number.NaN;
+    const sharpness=metrics?.sharpness ?? Number.NaN;
 
     const sizeScore=(size:number)=>{
       if(size<=0)return 0;
@@ -1514,7 +1517,11 @@ export function Transfer() {
       const geometryPenalty=perspectiveOk?.0:.15;
       const cropPenalty=cropped?.12:0;
       const lightingPenalty=!metricsKnown?0:brightness<42?.18:clippedHighlights>.24 && contrast<48?.16:0;
-      const sharpEnough=metricsKnown && (edgeEnergy>=7 || contrast>=34);
+      const sharpEnough=metricsKnown && (
+        sharpness>=10 ||
+        edgeEnergy>=7 ||
+        contrast>=34
+      );
       const currentConfidence=
         Math.max(0,
           .38*sizeScore(size)+
@@ -1617,7 +1624,11 @@ export function Transfer() {
       const lighting:OpticalGuideDiagnostics['lighting']=!metricsKnown?'unknown':brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good';
       const framing=centered?'good':'off';
       const geometry=cropped?'cropped':perspectiveOk?'good':'tilted';
-      const focus:OpticalGuideDiagnostics['focus']=!metricsKnown?'unknown':sharpEnough?'good':'soft';
+      const focus:OpticalGuideDiagnostics['focus']=!metricsKnown
+        ?'unknown'
+        :sharpness>=16 || (edgeEnergy>=10 && contrast>=38)
+          ?'good'
+          :'soft';
 
       setOpticalGuideDiagnostics({framing,distance,lighting,stability,geometry,focus});
 
@@ -1732,9 +1743,50 @@ export function Transfer() {
       }
     }
 
-    // No confirmed QR is currently visible. Never infer distance, direction,
-    // lighting, or framing from the absence of a detection.
+    // No confirmed QR is currently visible. We may still give environmental
+    // advice when those conditions are actually measured, but never invent QR
+    // position, distance, or geometry.
     guideDetectionStreakRef.current=0;
+    if(metricsKnown){
+      if(brightness<38){
+        setOpticalGuideDiagnostics({
+          framing:'searching',
+          distance:'unknown',
+          lighting:'dark',
+          stability:'moving',
+          geometry:'searching',
+          focus:'unknown',
+        });
+        applyMessage(
+          'Too dark to acquire the QR',
+          'The camera image is measured at about '+Math.round(brightness)+'/255 brightness. Brighten the sender screen or the room, then aim at the QR.',
+          'light',
+          Math.max(8,Math.min(42,Math.round(brightness))),
+        );
+        opticalGuideVisibleRef.current=false;
+        setOpticalGuideRect(null);
+        return;
+      }
+      if(clippedHighlights>.34 && contrast<34){
+        setOpticalGuideDiagnostics({
+          framing:'searching',
+          distance:'unknown',
+          lighting:'glare',
+          stability:'moving',
+          geometry:'searching',
+          focus:'unknown',
+        });
+        applyMessage(
+          'Reduce glare',
+          'Large bright regions are clipping in the camera image. Tilt the phone or sender display slightly to remove reflections.',
+          'light',
+          38,
+        );
+        opticalGuideVisibleRef.current=false;
+        setOpticalGuideRect(null);
+        return;
+      }
+    }
     guideMissStreakRef.current=Math.min(8,guideMissStreakRef.current);
     opticalTrackRef.current=null;
     opticalGroupBoxRef.current=null;
@@ -1754,40 +1806,92 @@ export function Transfer() {
     applyMessage('No QR code detected','No valid QR code has been confirmed in the camera view. Point the camera at the sender screen or QR code.','searching',0);
   };
 
-  function estimateOpticalFrameMetrics(image:ImageData):OpticalFrameMetrics{
-    // Sparse sampling keeps this cheap enough for the live receiver. We use
-    // luminance, local contrast and edge energy rather than expensive blur
-    // detection so the guide never becomes the bottleneck.
+  function estimateOpticalFrameMetrics(
+    image:ImageData,
+    region?:{x:number;y:number;width:number;height:number},
+  ):OpticalFrameMetrics{
+    // Sample the actual lock region when available. The guide should judge
+    // the QR itself, not an unrelated patch of the camera preview.
+    const rx=Math.max(0,Math.floor(region?.x ?? 0));
+    const ry=Math.max(0,Math.floor(region?.y ?? 0));
+    const rw=Math.min(image.width-rx,Math.floor(region?.width ?? image.width));
+    const rh=Math.min(image.height-ry,Math.floor(region?.height ?? image.height));
+    const x0=Math.max(0,Math.min(image.width-1,rx));
+    const y0=Math.max(0,Math.min(image.height-1,ry));
+    const width=Math.max(1,rw);
+    const height=Math.max(1,rh);
     const data=image.data;
-    const step=Math.max(8,Math.floor(Math.sqrt((image.width*image.height)/900)));
+    const area=width*height;
+    const step=Math.max(2,Math.floor(Math.sqrt(area/1400)));
     let count=0;
     let sum=0;
     let sumSq=0;
     let edgeSum=0;
+    let laplaceSum=0;
+    let laplaceSq=0;
     let clipped=0;
 
-    for(let y=0;y<image.height;y+=step){
+    const lumaAt=(x:number,y:number)=>{
+      const cx=Math.max(0,Math.min(image.width-1,x));
+      const cy=Math.max(0,Math.min(image.height-1,y));
+      const i=(cy*image.width+cx)*4;
+      return 0.2126*data[i]+0.7152*data[i+1]+0.0722*data[i+2];
+    };
+
+    for(let y=y0;y<y0+height;y+=step){
       let previousLuma=-1;
-      for(let x=0;x<image.width;x+=step){
-        const i=(y*image.width+x)*4;
-        const luma=0.2126*data[i]+0.7152*data[i+1]+0.0722*data[i+2];
+      for(let x=x0;x<x0+width;x+=step){
+        const luma=lumaAt(x,y);
         sum+=luma;
         sumSq+=luma*luma;
         if(luma>248) clipped+=1;
         if(previousLuma>=0) edgeSum+=Math.abs(luma-previousLuma);
         previousLuma=luma;
+
+        if(
+          x>x0+step && x<x0+width-step &&
+          y>y0+step && y<y0+height-step
+        ){
+          const center=luma;
+          const laplace=
+            lumaAt(x-step,y)+
+            lumaAt(x+step,y)+
+            lumaAt(x,y-step)+
+            lumaAt(x,y+step)-
+            4*center;
+          laplaceSum+=laplace;
+          laplaceSq+=laplace*laplace;
+        }
         count+=1;
       }
     }
 
-    if(count===0) return {brightness:128,contrast:64,edgeEnergy:18,clippedHighlights:0};
+    if(count===0) {
+      return {
+        brightness:128,
+        contrast:64,
+        edgeEnergy:18,
+        clippedHighlights:0,
+        sharpness:0,
+        sampledPixels:0,
+      };
+    }
     const brightness=sum/count;
     const variance=Math.max(0,sumSq/count-brightness*brightness);
+    const laplaceMean=laplaceSum/Math.max(1,count);
+    const laplaceVariance=Math.max(
+      0,
+      laplaceSq/Math.max(1,count)-laplaceMean*laplaceMean,
+    );
     return {
       brightness,
       contrast:Math.sqrt(variance),
       edgeEnergy:edgeSum/Math.max(1,count),
       clippedHighlights:clipped/count,
+      // Variance of the discrete Laplacian is a lightweight focus/sharpness
+      // proxy. It is computed sparsely and only over the relevant QR region.
+      sharpness:Math.sqrt(laplaceVariance),
+      sampledPixels:count,
     };
   }
 
@@ -2103,7 +2207,30 @@ export function Transfer() {
             const isNewestGeometry=frameSequence>=opticalLatestGeometrySequenceRef.current;
             if(isNewestGeometry){
               opticalLatestGeometrySequenceRef.current=frameSequence;
-              const frameMetrics=estimateOpticalFrameMetrics(image);
+              const metricRegion=decoded.boxes?.length
+                ? decoded.boxes.reduce((acc,box)=>({
+                    x:Math.min(acc.x,box.x),
+                    y:Math.min(acc.y,box.y),
+                    right:Math.max(acc.right,box.x+box.width),
+                    bottom:Math.max(acc.bottom,box.y+box.height),
+                  }),{
+                    x:decoded.boxes[0].x,
+                    y:decoded.boxes[0].y,
+                    right:decoded.boxes[0].x+decoded.boxes[0].width,
+                    bottom:decoded.boxes[0].y+decoded.boxes[0].height,
+                  })
+                : undefined;
+              const frameMetrics=estimateOpticalFrameMetrics(
+                image,
+                metricRegion
+                  ? {
+                      x:Math.max(0,metricRegion.x-8),
+                      y:Math.max(0,metricRegion.y-8),
+                      width:Math.min(width,metricRegion.right-metricRegion.x+16),
+                      height:Math.min(height,metricRegion.bottom-metricRegion.y+16),
+                    }
+                  : undefined,
+              );
               if(decoded.values.length>0){
                 const scaleX=roiWidth/Math.max(1,width);
                 const scaleY=roiHeight/Math.max(1,height);
