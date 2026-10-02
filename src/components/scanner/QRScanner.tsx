@@ -87,6 +87,7 @@ export function QRScanner() {
   const zxingRef = useRef<BrowserMultiFormatReader | null>(null);
   const zxingControlsRef = useRef<{ stop: () => void } | null>(null);
   const lastScanRef = useRef(0);
+  const scanGenerationRef = useRef(0);
   const scanDelayRef = useRef(70);
   const recentMultiFrameRef = useRef<Map<string, number>>(new Map());
 
@@ -114,6 +115,8 @@ export function QRScanner() {
   }, [multiImageResult]);
 
   function stopCamera() {
+    // Invalidate in-flight camera permission, detector, and timer callbacks.
+    scanGenerationRef.current += 1;
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     if (scanTimerRef.current !== null) window.clearTimeout(scanTimerRef.current);
     frameRef.current = null;
@@ -203,6 +206,7 @@ export function QRScanner() {
     setMultiImageResult(null);
     setMultiProgress(null);
     stopCamera();
+    const generation = scanGenerationRef.current;
     scanDelayRef.current = 70;
 
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -220,6 +224,10 @@ export function QRScanner() {
         audio: false,
       });
 
+      if (generation !== scanGenerationRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       const track = stream.getVideoTracks()[0];
       const capabilities = (track?.getCapabilities?.() ?? {}) as MediaTrackCapabilities & {
@@ -261,13 +269,14 @@ export function QRScanner() {
     }
   }
 
-  async function scanFrame() {
+  async function scanFrame(generation = scanGenerationRef.current) {
+    if (generation !== scanGenerationRef.current) return;
     const video = videoRef.current;
     if (!video || !streamRef.current || !detectorRef.current) return;
 
     const now = performance.now();
     if (now - lastScanRef.current < 90) {
-      frameRef.current = requestAnimationFrame(scanFrame);
+      frameRef.current = requestAnimationFrame(() => void scanFrame(generation));
       return;
     }
     lastScanRef.current = now;
@@ -276,7 +285,9 @@ export function QRScanner() {
 
     try {
       if (video.readyState >= 2) {
-        const found = await detectorRef.current.detect(video);
+        const detector = detectorRef.current;
+        const found = await detector.detect(video);
+        if (generation !== scanGenerationRef.current || detector !== detectorRef.current) return;
         foundCount = found.length;
         if (foundCount) await handleBatchDecoded(found);
       }
@@ -291,7 +302,7 @@ export function QRScanner() {
 
     scanTimerRef.current = window.setTimeout(() => {
       scanTimerRef.current = null;
-      if (streamRef.current && detectorRef.current) void scanFrame();
+      if (generation === scanGenerationRef.current && streamRef.current && detectorRef.current) void scanFrame(generation);
     }, scanDelayRef.current);
   }
 
