@@ -755,7 +755,18 @@ export function Transfer() {
   function applyFeedbackAck(value:string){
     const ack=parseAckPayload(value);
     const activePlan=compat ?? fountain;
-    if(!ack || !activePlan || ack.sequence<=feedbackLastAckSeqRef.current || ack.session!==activePlan.session) return false;
+    const expectedMode=compat ? 'compatibility' : fountain ? 'fountain' : null;
+    const expectedTotal=compat?.total ?? fountain?.blocks ?? 0;
+    // Validate the full transfer identity before allowing an ACK to affect
+    // link state, retransmission, or the adaptive speed governor.
+    if(
+      !ack ||
+      !activePlan ||
+      ack.sequence<=feedbackLastAckSeqRef.current ||
+      ack.session!==activePlan.session ||
+      ack.mode!==expectedMode ||
+      ack.total!==expectedTotal
+    ) return false;
 
     feedbackLastAckSeqRef.current=ack.sequence;
     feedbackConnectedRef.current=true;
