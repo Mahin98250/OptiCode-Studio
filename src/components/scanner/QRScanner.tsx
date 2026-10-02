@@ -125,7 +125,9 @@ export function QRScanner() {
     zxingControlsRef.current?.stop();
     zxingControlsRef.current = null;
 
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    const activeStream = streamRef.current;
+    activeStream?.getTracks().forEach((track) => track.stop());
+    if (videoRef.current?.srcObject === activeStream) videoRef.current.srcObject = null;
     streamRef.current = null;
     detectorRef.current = null;
     recentMultiFrameRef.current.clear();
@@ -154,7 +156,7 @@ export function QRScanner() {
       setEngine(`Scanner ready`);
       return true;
     } catch {
-      detectorRef.current = null;
+      if (generation === scanGenerationRef.current) detectorRef.current = null;
       return false;
     }
   }
@@ -180,7 +182,7 @@ export function QRScanner() {
           const foundFormat = normalizeFormat(decoded.getBarcodeFormat()?.toString());
           if (!isFormatAllowed(foundFormat, nextMode)) return;
 
-          void handleDecoded(value, foundFormat);
+          void handleDecoded(value, foundFormat, generation);
           if (!isMultiImageQr(value)) stopAfterDecode = true;
           return;
         }
@@ -198,6 +200,7 @@ export function QRScanner() {
       }
       setEngine('Backup scanner');
     } catch {
+      if (generation !== scanGenerationRef.current) return;
       setEngine('Basic scanner');
       scanFrame(generation);
     }
@@ -273,6 +276,8 @@ export function QRScanner() {
         await startZXing(videoRef.current, nextMode, generation);
       }
     } catch (cameraError) {
+      if (generation !== scanGenerationRef.current) return;
+      stopCamera();
       const name = cameraError instanceof DOMException ? cameraError.name : '';
       if (name === 'NotAllowedError') setError('Camera access was blocked. Allow camera access and try again.');
       else if (name === 'NotFoundError') setError('No camera was found on this device.');
@@ -300,7 +305,7 @@ export function QRScanner() {
         const found = await detector.detect(video);
         if (generation !== scanGenerationRef.current || detector !== detectorRef.current) return;
         foundCount = found.length;
-        if (foundCount) await handleBatchDecoded(found);
+        if (foundCount) await handleBatchDecoded(found, generation);
       }
     } catch {
       // Keep scanning through transient camera/detector errors.
@@ -317,7 +322,8 @@ export function QRScanner() {
     }, scanDelayRef.current);
   }
 
-  async function handleBatchDecoded(results: BarcodeResult[]) {
+  async function handleBatchDecoded(results: BarcodeResult[], generation?: number) {
+    if (generation !== undefined && generation !== scanGenerationRef.current) return;
     const values = results
       .filter((item) => item.rawValue)
       .map((item) => ({ value: item.rawValue!.trim(), format: normalizeFormat(item.format) }))
@@ -325,7 +331,11 @@ export function QRScanner() {
 
     const multiValues = values.filter(item => isMultiImageQr(item.value));
     if (multiValues.length) {
-      for (const item of multiValues) await handleDecoded(item.value, item.format);
+      for (const item of multiValues) {
+        if (generation !== undefined && generation !== scanGenerationRef.current) return;
+        await handleDecoded(item.value, item.format, generation);
+      }
+      if (generation !== undefined && generation !== scanGenerationRef.current) return;
       const normalValues = values.filter(item => !isMultiImageQr(item.value));
       if (!normalValues.length) return;
       // If an image contains both transfer frames and ordinary codes, keep the
@@ -356,8 +366,8 @@ export function QRScanner() {
     stopCamera();
   }
 
-  async function handleDecoded(value: string, foundFormat = 'qr_code') {
-    if (!value) return;
+  async function handleDecoded(value: string, foundFormat = 'qr_code', generation?: number) {
+    if (!value || (generation !== undefined && generation !== scanGenerationRef.current)) return;
     if (isMultiImageQr(value)) {
       const now = performance.now();
       const previous = recentMultiFrameRef.current.get(value);
@@ -374,6 +384,7 @@ export function QRScanner() {
 
       try {
         const progress = await addMultiImageChunk(value);
+        if (generation !== undefined && generation !== scanGenerationRef.current) return;
         if (!progress) { setError('This Multi-QR photo frame is invalid.'); return; }
 
         setMultiProgress({
@@ -389,6 +400,10 @@ export function QRScanner() {
 
         if (progress.complete) {
           const rebuilt = await reconstructMultiImage(parsed.id);
+          if (generation !== undefined && generation !== scanGenerationRef.current) {
+            if (rebuilt?.url) URL.revokeObjectURL(rebuilt.url);
+            return;
+          }
           if (rebuilt) {
             if (multiImageResult?.url) URL.revokeObjectURL(multiImageResult.url);
             setMultiImageResult(rebuilt);
@@ -397,6 +412,7 @@ export function QRScanner() {
           }
         }
       } catch (e) {
+        if (generation !== undefined && generation !== scanGenerationRef.current) return;
         setError(e instanceof Error ? e.message : 'Unable to store this Multi-QR frame.');
       }
       return;
