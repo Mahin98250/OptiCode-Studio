@@ -460,13 +460,22 @@ export async function createOpticalFountainTransfer(
     if (pending) return pending;
 
     const promise = (async () => {
-      const block = new Uint8Array(blockBytes);
       const start = index * blockBytes;
       const end = Math.min(file.size, start + blockBytes);
-      if (end > start) {
-        const source = new Uint8Array(await file.slice(start, end).arrayBuffer());
-        block.set(source);
+      if (end <= start) return cacheBlock(index, new Uint8Array(blockBytes));
+
+      const buffer = await file.slice(start, end).arrayBuffer();
+      // A full source block can be cached directly from the File slice's
+      // ArrayBuffer. The previous path allocated a second block-sized array
+      // and copied the slice into it on every read. Only the final short block
+      // needs a padded allocation so all fountain XOR operations keep a fixed
+      // block width.
+      if (buffer.byteLength === blockBytes) {
+        return cacheBlock(index, new Uint8Array(buffer));
       }
+
+      const block = new Uint8Array(blockBytes);
+      block.set(new Uint8Array(buffer));
       return cacheBlock(index, block);
     })().finally(() => {
       sourceBlockInFlight.delete(index);
