@@ -160,18 +160,16 @@ function createOptiFrameHeader(
   return header;
 }
 
-function writePackedSymbol(
-  out: Uint8Array,
-  cursorBits: number,
-  symbol: number,
-  bitsPerCell: number,
-) {
-  for (let bit = 0; bit < bitsPerCell; bit += 1) {
-    const absoluteBit = cursorBits + bit;
-    const byteIndex = absoluteBit >>> 3;
-    const shift = 7 - (absoluteBit & 7);
-    if ((symbol >>> (bitsPerCell - 1 - bit)) & 1) out[byteIndex] |= 1 << shift;
+function readBit(bytes: Uint8Array, bit: number) {
+  return (bytes[bit >>> 3] >>> (7 - (bit & 7))) & 1;
+}
+
+function readSymbol(bytes: Uint8Array, bit: number, bitsPerCell: OptiFrameDensity) {
+  let symbol = 0;
+  for (let bitIndex = 0; bitIndex < bitsPerCell; bitIndex += 1) {
+    symbol = (symbol << 1) | readBit(bytes, bit + bitIndex);
   }
+  return symbol;
 }
 
 function rasterizeOptiFrameWithDensity(
@@ -197,26 +195,13 @@ function rasterizeOptiFrameWithDensity(
   body[payload.length + 2] = crc >>> 8;
   body[payload.length + 3] = crc;
 
-  const totalPackedBytes = Math.ceil((DATA_CELL_COORDS.length * bitsPerCell) / 8);
-  const packed = new Uint8Array(totalPackedBytes);
-
-  for (let bit = 0; bit < HEADER_BITS; bit += 1) {
-    const value = (header[bit >>> 3] >>> (7 - (bit & 7))) & 1;
-    writePackedSymbol(packed, bit, value, 1);
-  }
-
-  const bodyStartBit = HEADER_BITS;
-  for (let bodyBit = 0; bodyBit < body.length * 8; bodyBit += bitsPerCell) {
-    let symbol = 0;
-    const available = Math.min(bitsPerCell, body.length * 8 - bodyBit);
-    for (let bit = 0; bit < available; bit += 1) {
-      const absoluteBit = bodyBit + bit;
-      symbol = (symbol << 1) | ((body[absoluteBit >>> 3] >>> (7 - (absoluteBit & 7))) & 1);
-    }
-    symbol <<= bitsPerCell - available;
-    writePackedSymbol(packed, bodyStartBit + bodyBit, symbol, bitsPerCell);
-  }
-
+  // The previous encoder built a complete packed bitstream and then walked
+  // that buffer again just to extract the symbols written to the raster.
+  // The protocol stream is already byte-oriented: header bits followed by
+  // payload+CRC bits. Read symbols directly from those two buffers instead.
+  // This removes one 8–16 KB allocation, one full bitstream write pass and
+  // one full bitstream read pass from every generated optical frame.
+  const headerSymbols = HEADER_BITS / bitsPerCell;
   const pixels = new Uint8ClampedArray(OPTIFRAME_SIZE * OPTIFRAME_SIZE * 4);
   pixels.fill(255);
 
@@ -233,23 +218,28 @@ function rasterizeOptiFrameWithDensity(
     pixels[index + 3] = 255;
   }
 
-  let cursorBits = 0;
-  for (const coord of DATA_CELL_COORDS) {
+  for (let cell = 0; cell < DATA_CELL_COORDS.length; cell += 1) {
+    const coord = DATA_CELL_COORDS[cell];
     const row = coord >>> 8;
     const col = coord & 255;
     const index = (row * OPTIFRAME_SIZE + col) * 4;
-    let symbol = 0;
-    for (let bit = 0; bit < bitsPerCell; bit += 1) {
-      const absoluteBit = cursorBits + bit;
-      const packedByte = packed[absoluteBit >>> 3] ?? 0;
-      symbol = (symbol << 1) | ((packedByte >>> (7 - (absoluteBit & 7))) & 1);
+
+    let symbol: number;
+    if (cell < headerSymbols) {
+      symbol = readSymbol(header, cell * bitsPerCell, bitsPerCell);
+    } else {
+      const bodyBit = (cell * bitsPerCell) - HEADER_BITS;
+      const bodyBitsRemaining = body.length * 8 - bodyBit;
+      symbol = bodyBitsRemaining > 0
+        ? readSymbol(body, bodyBit, bitsPerCell)
+        : 0;
     }
+
     const luminance = luminanceLevels[Math.min(luminanceLevels.length - 1, symbol)];
     pixels[index] = luminance;
     pixels[index + 1] = luminance;
     pixels[index + 2] = luminance;
     pixels[index + 3] = 255;
-    cursorBits += bitsPerCell;
   }
 
   return { width: OPTIFRAME_SIZE, height: OPTIFRAME_SIZE, pixels };
