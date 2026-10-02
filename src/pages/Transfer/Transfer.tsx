@@ -258,7 +258,11 @@ export function Transfer() {
         // transition, this is frame-rate independent, never overshoots, and
         // keeps the overlay glued to the latest detector target while the
         // decoder itself may only refresh at 10–30 Hz.
-        const omega=30;
+        // Raise spring response during larger target motion, then settle
+        // smoothly for small corrections. This reduces visible tracking lag
+        // without making a stationary lock jitter.
+        const targetMotion=Math.hypot(target.left-base.left,target.top-base.top);
+        const omega=targetMotion>3?44:targetMotion>1?36:30;
         (['left','top','width','height'] as const).forEach(key=>{
           const displacement=base[key]-target[key];
           const v=velocity[key];
@@ -1728,10 +1732,10 @@ export function Transfer() {
     // system from inventing a QR when the camera is pointed at an empty scene.
     guideMissStreakRef.current+=1;
     const currentConfirmed=current?.confirmed===true;
-    if(current && currentConfirmed && guideMissStreakRef.current<=2){
+    if(current && currentConfirmed && guideMissStreakRef.current<=3){
       const age=now-current.lastSeenAt;
-      if(age<=220){
-        const dt=Math.min(140,Math.max(0,age));
+      if(age<=320){
+        const dt=Math.min(180,Math.max(0,age));
         const predicted={
           x:current.box.x+current.vx*dt,
           y:current.box.y+current.vy*dt,
@@ -1744,7 +1748,7 @@ export function Transfer() {
           width:Math.min(frameWidth,predicted.width),
           height:Math.min(frameHeight,predicted.height),
         };
-        const decayed=Math.max(0,current.confidence-Math.min(.30,age/900));
+        const decayed=Math.max(0,current.confidence-Math.min(.38,age/840));
         opticalTrackRef.current={...current,box:clamped,vx:current.vx*.84,vy:current.vy*.84,vw:current.vw*.84,vh:current.vh*.84,confidence:decayed,misses:current.misses+1};
         setOpticalTrack({confidence:decayed,predicted:true,ageMs:Math.round(age)});
         setRectFromBox(clamped);
