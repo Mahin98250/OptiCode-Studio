@@ -1280,10 +1280,12 @@ export function Transfer() {
     if(!receivingRef.current) return;
 
     const now=performance.now();
-    const brightness=metrics?.brightness ?? 128;
-    const contrast=metrics?.contrast ?? 64;
-    const edgeEnergy=metrics?.edgeEnergy ?? 18;
-    const clippedHighlights=metrics?.clippedHighlights ?? 0;
+    // Missing pixel metrics are unknown, not evidence of good lighting/focus.
+    const metricsKnown=Boolean(metrics);
+    const brightness=metrics?.brightness ?? Number.NaN;
+    const contrast=metrics?.contrast ?? Number.NaN;
+    const edgeEnergy=metrics?.edgeEnergy ?? Number.NaN;
+    const clippedHighlights=metrics?.clippedHighlights ?? Number.NaN;
 
     const sizeScore=(size:number)=>{
       if(size<=0)return 0;
@@ -1417,7 +1419,7 @@ export function Transfer() {
           setOpticalGuideDiagnostics({
             framing:'good',
             distance:'good',
-            lighting:brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
+            lighting:!metricsKnown?'unknown':brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
             stability:'moving',
             geometry:'good',
             focus:'unknown',
@@ -1511,14 +1513,14 @@ export function Transfer() {
         : 0;
       const geometryPenalty=perspectiveOk?.0:.15;
       const cropPenalty=cropped?.12:0;
-      const lightingPenalty=brightness<42?.18:clippedHighlights>.24 && contrast<48?.16:0;
-      const sharpEnough=edgeEnergy>=7 || contrast>=34;
+      const lightingPenalty=!metricsKnown?0:brightness<42?.18:clippedHighlights>.24 && contrast<48?.16:0;
+      const sharpEnough=metricsKnown && (edgeEnergy>=7 || contrast>=34);
       const currentConfidence=
         Math.max(0,
           .38*sizeScore(size)+
           .20*(centered?1:.35)+
-          .12*(brightness>=42?1:.3)+
-          .10*(sharpEnough?1:.35)+
+          .12*(metricsKnown?(brightness>=42?1:.3):.6)+
+          .10*(metricsKnown?(sharpEnough?1:.35):.6)+
           .08*(movement<.04?1:.5)+
           .07*(perspectiveOk?1:.35)+
           .05*(cropped?.25:1)-
@@ -1612,10 +1614,10 @@ export function Transfer() {
       const stability=movement>.045 || sizeMovement>.035
         ?'moving'
         :guideStableCountRef.current>=5?'locked':'steady';
-      const lighting=brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good';
+      const lighting:OpticalGuideDiagnostics['lighting']=!metricsKnown?'unknown':brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good';
       const framing=centered?'good':'off';
       const geometry=cropped?'cropped':perspectiveOk?'good':'tilted';
-      const focus=sharpEnough?'good':'soft';
+      const focus:OpticalGuideDiagnostics['focus']=!metricsKnown?'unknown':sharpEnough?'good':'soft';
 
       setOpticalGuideDiagnostics({framing,distance,lighting,stability,geometry,focus});
 
@@ -1720,7 +1722,7 @@ export function Transfer() {
         setOpticalGuideDiagnostics({
           framing:centered?'good':'off',
           distance:'good',
-          lighting:brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
+          lighting:!metricsKnown?'unknown':brightness<42?'dark':clippedHighlights>.24 && contrast<48?'glare':'good',
           stability:'moving',
           geometry:'good',
           focus:'unknown',
