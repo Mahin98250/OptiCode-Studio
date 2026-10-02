@@ -134,12 +134,13 @@ export function QRScanner() {
     setTorch(false);
   }
 
-  async function createNativeDetector(nextMode: ScanMode) {
+  async function createNativeDetector(nextMode: ScanMode, generation = scanGenerationRef.current) {
     const Constructor = window.BarcodeDetector;
     if (!Constructor) return false;
 
     try {
       const available = (await Constructor.getSupportedFormats?.()) ?? COMMON_BARCODE_FORMATS;
+      if (generation !== scanGenerationRef.current || !streamRef.current) return false;
       const requested = nextMode === 'qr'
         ? ['qr_code']
         : nextMode === 'barcode'
@@ -166,13 +167,14 @@ export function QRScanner() {
     return true;
   }
 
-  async function startZXing(video: HTMLVideoElement, nextMode: ScanMode = mode) {
+  async function startZXing(video: HTMLVideoElement, nextMode: ScanMode = mode, generation = scanGenerationRef.current) {
     try {
       const reader = new BrowserMultiFormatReader();
       zxingRef.current = reader;
       let stopAfterDecode = false;
 
       const controls = await reader.decodeFromVideoElement(video, (decoded, decodeError) => {
+        if (generation !== scanGenerationRef.current) return;
         if (decoded?.getText()) {
           const value = decoded.getText().trim();
           const foundFormat = normalizeFormat(decoded.getBarcodeFormat()?.toString());
@@ -185,6 +187,10 @@ export function QRScanner() {
         void decodeError;
       });
 
+      if (generation !== scanGenerationRef.current) {
+        controls.stop();
+        return;
+      }
       zxingControlsRef.current = controls;
       if (stopAfterDecode) {
         controls.stop();
@@ -193,7 +199,7 @@ export function QRScanner() {
       setEngine('Backup scanner');
     } catch {
       setEngine('Basic scanner');
-      scanFrame();
+      scanFrame(generation);
     }
   }
 
@@ -250,16 +256,21 @@ export function QRScanner() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+      if (generation !== scanGenerationRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
       setFacingMode(nextFacing);
       setScanning(true);
 
-      const nativeReady = await createNativeDetector(nextMode);
+      const nativeReady = await createNativeDetector(nextMode, generation);
+      if (generation !== scanGenerationRef.current) return;
 
       if (nativeReady) {
         scanFrame();
       } else if (videoRef.current) {
-        await startZXing(videoRef.current, nextMode);
+        await startZXing(videoRef.current, nextMode, generation);
       }
     } catch (cameraError) {
       const name = cameraError instanceof DOMException ? cameraError.name : '';
