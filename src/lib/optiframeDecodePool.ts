@@ -36,7 +36,13 @@ export class OptiFrameDecodePool {
   private nextId = 1;
 
   constructor(
-    size = Math.min(8, Math.max(1, (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2) - 1)),
+    size = (() => {
+      const cpu = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+      const touchDevice = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+      return touchDevice
+        ? Math.min(2, Math.max(1, cpu - 1))
+        : Math.min(8, Math.max(1, cpu - 1));
+    })(),
     enabled = typeof Worker !== 'undefined',
   ) {
     if (!enabled) return;
