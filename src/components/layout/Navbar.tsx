@@ -10,7 +10,7 @@ const links = [
   { to: '/generator', label: 'Create', icon: QrCode },
   { to: '/scanner', label: 'Scan', icon: ScanLine },
   { to: '/tools', label: 'More', icon: Wrench },
-  { to: '/transfer', label: 'Send files', icon: Zap },
+  { to: '/optiframe', label: 'Send files', icon: Zap },
   { to: '/history', label: 'Saved', icon: BarChart3 },
   { to: '/statistics', label: 'Activity', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings2 },
@@ -21,7 +21,7 @@ const mobileLinks = [
   { to: '/generator', label: 'Create', icon: QrCode, tone: 'nav-tone-amber' },
   { to: '/scanner', label: 'Scan', icon: ScanLine, tone: 'nav-tone-violet' },
   { to: '/tools', label: 'More', icon: Wrench, tone: 'nav-tone-blue' },
-  { to: '/transfer', label: 'Send', icon: Zap, tone: 'nav-tone-rose' },
+  { to: '/optiframe', label: 'Send', icon: Zap, tone: 'nav-tone-rose' },
 ];
 
 const capsuleTransition = {
