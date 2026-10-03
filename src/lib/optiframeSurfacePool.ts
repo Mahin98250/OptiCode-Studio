@@ -36,7 +36,11 @@ export class OptiFrameSurfacePool {
   private generation = 0;
 
   constructor(
-    size = Math.min(2, Math.max(1, (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2) - 1)),
+    size = (() => {
+      const cpu = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+      const touchDevice = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+      return touchDevice ? 1 : Math.min(2, Math.max(1, cpu - 1));
+    })(),
     enabled = typeof Worker !== 'undefined' && typeof OffscreenCanvas !== 'undefined',
   ) {
     if (!enabled) return;
