@@ -607,15 +607,35 @@ export function OptiFrameLab() {
   async function selectTransferFile(file?: File, densityOverride: 2 | 4 = opticalDensity) {
     if (!file) return;
     try {
+      // First-load profile: large transfers benefit disproportionately from
+      // Dense4's ~2× payload density and an automatically sized desktop lane
+      // grid. Subsequent control changes stay explicit and are not overwritten.
+      const firstFileLoad = transferFile === null && opticalFountainPlan === null;
+      const isLargeTransfer = file.size >= 4 * 1024 * 1024;
+      const physicalDevice = navigator.maxTouchPoints > 0
+        || window.matchMedia?.('(pointer: coarse)').matches === true;
+      const automaticDensity: 2 | 4 = firstFileLoad && isLargeTransfer ? 4 : densityOverride;
+      const automaticLanes: OptiLaneCount =
+        firstFileLoad
+          ? (physicalDevice
+            ? 1
+            : recommendOptiLaneCount(
+              window.innerWidth,
+              window.innerHeight,
+              window.devicePixelRatio || 1,
+            ))
+          : laneCount;
+
       setStatus('Preparing ' + file.name + ' for binary optical fountain transfer…');
-      const plan = await createOpticalFountainTransfer(file, { densityBits: densityOverride });
+      const plan = await createOpticalFountainTransfer(file, { densityBits: automaticDensity });
       setTransferFile(file);
       setTransferData(null);
       setOpticalFountainPlan(plan);
+      setLaneCount(automaticLanes);
       setStreamIndex(0);
       setStreamIntervalMs(8);
       setStreamPlaying(false);
-      setOpticalDensity(densityOverride);
+      setOpticalDensity(automaticDensity);
       setStatus(
         file.name +
         ' ready · ' +
@@ -624,7 +644,8 @@ export function OptiFrameLab() {
         plan.totalBlocks.toLocaleString() +
         ' source blocks · ' +
         plan.blockBytes.toLocaleString() +
-        ' bytes/optical frame payload · binary ' + plan.densityBits + '-bit OptiFrame fountain enabled · file-backed source blocks.',
+        ' bytes/optical frame payload · binary ' + plan.densityBits + '-bit OptiFrame fountain enabled · ' +
+        automaticLanes + '× optical lane profile · file-backed source blocks.',
       );
     } catch (error) {
       setTransferFile(null);
