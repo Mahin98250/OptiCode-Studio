@@ -131,11 +131,20 @@ export function OptiFrameLab() {
   const senderSurfaceCacheRef = useRef(new Map<string, HTMLCanvasElement>());
   const assemblerRef = useRef(new OptiFrameAssembler());
   const opticalFountainDecoderRef = useRef(new OpticalFountainDecoder());
-  // Keep worker pools stable across renders; useRef(new Pool()) evaluates the constructor every render.
-  const decodePoolRef = useRef<OptiFrameDecodePool>(null!);
-  if (decodePoolRef.current === null) decodePoolRef.current = new OptiFrameDecodePool();
-  const surfacePoolRef = useRef<OptiFrameSurfacePool>(null!);
-  if (surfacePoolRef.current === null) surfacePoolRef.current = new OptiFrameSurfacePool();
+  // Keep worker pools lazy and stable: mobile should be able to open Send File
+  // without synchronously starting several module workers before the first paint.
+  const decodePoolRef = useRef<OptiFrameDecodePool | null>(null);
+  const surfacePoolRef = useRef<OptiFrameSurfacePool | null>(null);
+
+  const getDecodePool = () => {
+    if (!decodePoolRef.current) decodePoolRef.current = new OptiFrameDecodePool();
+    return decodePoolRef.current;
+  };
+
+  const getSurfacePool = () => {
+    if (!surfacePoolRef.current) surfacePoolRef.current = new OptiFrameSurfacePool();
+    return surfacePoolRef.current;
+  };
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const presentationCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -252,8 +261,8 @@ export function OptiFrameLab() {
   useEffect(() => {
     return () => {
       stopCamera();
-      decodePoolRef.current.terminate();
-      surfacePoolRef.current.terminate();
+      decodePoolRef.current?.terminate();
+      surfacePoolRef.current?.terminate();
       if (receivedFileUrlRef.current) URL.revokeObjectURL(receivedFileUrlRef.current);
     };
   }, []);
@@ -287,7 +296,7 @@ export function OptiFrameLab() {
     senderGroupRef.current = Math.floor(streamIndexValueRef.current / laneCount);
     senderLastPaintAtRef.current = 0;
     senderSurfaceCacheRef.current.clear();
-    surfacePoolRef.current.clear();
+    getSurfacePool().clear();
 
     const getPayloads = async (group: number) => opticalFountainPlan
       ? Promise.all(Array.from({ length: laneCount }, (_, lane) => opticalFountainPlan.getFrame(lane, group, laneCount)))
@@ -307,7 +316,7 @@ export function OptiFrameLab() {
             nextGroup,
           ].join(':'),
         }))
-        .filter(target => !surfacePoolRef.current.has(target.key));
+        .filter(target => !getSurfacePool().has(target.key));
 
       if (targets.length === 0) return;
 
@@ -319,8 +328,8 @@ export function OptiFrameLab() {
       );
 
       for (const { nextGroup, key, payloads } of prefetched) {
-        if (surfacePoolRef.current.has(key)) continue;
-        surfacePoolRef.current.request(
+        if (getSurfacePool().has(key)) continue;
+        getSurfacePool().request(
           key,
           nextGroup,
           streamGroupCount,
@@ -346,7 +355,7 @@ export function OptiFrameLab() {
         ].join(':');
 
         let surface = senderSurfaceCacheRef.current.get(key);
-        let workerBitmap = surfacePoolRef.current.take(key);
+        let workerBitmap = getSurfacePool().take(key);
         if (!surface && !workerBitmap) {
           const payloads = await getPayloads(group);
 
@@ -910,7 +919,7 @@ export function OptiFrameLab() {
       target: ImageData,
       previousAnchors: OptiFramePerspectiveDiagnostics['anchors'] | null = null,
     ) => {
-      const job = decodePoolRef.current.decode(
+      const job = getDecodePool().decode(
         target.data.buffer,
         target.width,
         target.height,
@@ -936,7 +945,7 @@ export function OptiFrameLab() {
       target: ImageData,
       previousAnchors: OptiFramePerspectiveDiagnostics['anchors'] | null = null,
     ) => {
-      const capacityBefore = decodePoolRef.current.capacity;
+      const capacityBefore = getDecodePool().capacity;
       const worker = await runWorker(target, previousAnchors);
       if (worker.result) return worker;
 
@@ -944,7 +953,7 @@ export function OptiFrameLab() {
       // when the pool has actually lost capacity (or started with none).
       // This keeps the main thread off the hot path while still preserving
       // camera functionality on browsers that cannot keep workers alive.
-      const capacityAfter = decodePoolRef.current.capacity;
+      const capacityAfter = getDecodePool().capacity;
       const workerUnavailable = capacityAfter === 0 || capacityAfter < capacityBefore;
       const local = workerUnavailable ? runLocal(target) : null;
       return {
@@ -971,7 +980,7 @@ export function OptiFrameLab() {
       // Queue the entire lane set through the bounded worker scheduler.
       // This prevents lanes from being discarded just because the pool has
       // fewer workers than the selected optical grid.
-      const workerResults = await decodePoolRef.current.decodeBatch(
+      const workerResults = await getDecodePool().decodeBatch(
         lanes.map(lane => ({
           buffer: lane.image.data.buffer,
           width: lane.image.width,
@@ -1224,7 +1233,7 @@ export function OptiFrameLab() {
     });
 
     if (!result) {
-      if (decodePoolRef.current.capacity === 0) {
+      if (getDecodePool().capacity === 0) {
         setStatus('OptiFrame decoder workers are unavailable in this browser. Upload decoding still works; camera MVP requires Web Worker support.');
       } else if (acquisitionFailureRef.current >= 2) {
         setStatus('Searching for a 1× OptiFrame…');
@@ -1278,7 +1287,7 @@ export function OptiFrameLab() {
       complete: assembly.complete,
     });
 
-    setStatus(`Live frame ${frame.sequence + 1}/${frame.total} · ${Math.round(result.diagnostics.confidence * 100)}% anchor confidence · ${result.diagnostics.decodeMs.toFixed(0)} ms decode${workerResult ? ` · worker ${workerResult.workerIndex + 1}` : ' · local'} · ${decodePoolRef.current.busyCount}/${decodePoolRef.current.capacity} workers busy`);
+    setStatus(`Live frame ${frame.sequence + 1}/${frame.total} · ${Math.round(result.diagnostics.confidence * 100)}% anchor confidence · ${result.diagnostics.decodeMs.toFixed(0)} ms decode${workerResult ? ` · worker ${workerResult.workerIndex + 1}` : ' · local'} · ${getDecodePool().busyCount}/${getDecodePool().capacity} workers busy`);
 
     if (assembly.complete && assembly.payload) {
       finishReceivedPayload(assembly.payload);
@@ -1368,10 +1377,10 @@ export function OptiFrameLab() {
       const tick = () => {
         if (!streamRef.current) return;
         const maxInFlight = laneCount === 1
-          ? Math.min(3, Math.max(1, decodePoolRef.current.capacity))
+          ? Math.min(3, Math.max(1, getDecodePool().capacity))
           : Math.min(
               2,
-              Math.max(1, Math.floor((decodePoolRef.current.capacity || 1) / laneCount)),
+              Math.max(1, Math.floor((getDecodePool().capacity || 1) / laneCount)),
             );
         if (opticalDecodeInFlightRef.current < maxInFlight) {
           opticalDecodeInFlightRef.current += 1;
@@ -1673,7 +1682,7 @@ export function OptiFrameLab() {
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Duplicates</p><p className="mt-1 text-lg font-black text-[var(--text)]">{cameraStats.duplicates}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Decode ms</p><p className="mt-1 text-lg font-black text-[var(--text)]">{cameraStats.lastMs.toFixed(0)}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Goodput</p><p className="mt-1 text-lg font-black text-[var(--text)]">{(cameraStats.goodputBps / 1024).toFixed(1)} KB/s</p></div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Workers</p><p className="mt-1 text-lg font-black text-[var(--text)]">{decodePoolRef.current.busyCount}/{decodePoolRef.current.capacity}</p></div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Workers</p><p className="mt-1 text-lg font-black text-[var(--text)]">{getDecodePool().busyCount}/{getDecodePool().capacity}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Decode FPS</p><p className="mt-1 text-lg font-black text-[var(--text)]">{cameraStats.decodeFps.toFixed(1)}</p></div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-soft)] p-3"><p className="text-[10px] text-[var(--text-muted)]">Anchor confidence</p><p className="mt-1 text-lg font-black text-[var(--text)]">{Math.round(cameraStats.lastConfidence * 100)}%</p></div>
             <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-3"><p className="text-[10px] text-cyan-200">Live goodput</p><p className="mt-1 text-lg font-black text-[var(--text)]">{formatRate(cameraStats.rollingGoodputBps)}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">5 s rolling receiver rate</p></div>
