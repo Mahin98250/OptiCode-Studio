@@ -607,24 +607,13 @@ export function OptiFrameLab() {
   async function selectTransferFile(file?: File, densityOverride: 2 | 4 = opticalDensity) {
     if (!file) return;
     try {
-      // First-load profile: large transfers benefit disproportionately from
-      // Dense4's ~2× payload density and an automatically sized desktop lane
-      // grid. Subsequent control changes stay explicit and are not overwritten.
+      // Acquisition-first profile: start with one large, robust 2-bit frame.
+      // Dense4 and multi-lane grids reduce per-module pixel area and are
+      // intentionally opt-in until the receiving camera has proven it can lock.
+      // This avoids silently sending a 4x4 grid to a receiver still set to 1×.
       const firstFileLoad = transferFile === null && opticalFountainPlan === null;
-      const isLargeTransfer = file.size >= 4 * 1024 * 1024;
-      const physicalDevice = navigator.maxTouchPoints > 0
-        || window.matchMedia?.('(pointer: coarse)').matches === true;
-      const automaticDensity: 2 | 4 = firstFileLoad && isLargeTransfer ? 4 : densityOverride;
-      const automaticLanes: OptiLaneCount =
-        firstFileLoad
-          ? (physicalDevice
-            ? 1
-            : recommendOptiLaneCount(
-              window.innerWidth,
-              window.innerHeight,
-              window.devicePixelRatio || 1,
-            ))
-          : laneCount;
+      const automaticDensity: 2 | 4 = firstFileLoad ? 2 : densityOverride;
+      const automaticLanes: OptiLaneCount = firstFileLoad ? 1 : laneCount;
 
       setStatus('Preparing ' + file.name + ' for binary optical fountain transfer…');
       const plan = await createOpticalFountainTransfer(file, { densityBits: automaticDensity });
