@@ -21,7 +21,7 @@ export type AdaptiveTransmissionConfig = {
 };
 
 const DEFAULTS = {
-  minIntervalMs: 8,
+  minIntervalMs: 4,
   maxIntervalMs: 500,
   targetRenderMs: 18,
   targetSuccessRate: 0.82,
