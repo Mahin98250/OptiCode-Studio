@@ -131,8 +131,11 @@ export function OptiFrameLab() {
   const senderSurfaceCacheRef = useRef(new Map<string, HTMLCanvasElement>());
   const assemblerRef = useRef(new OptiFrameAssembler());
   const opticalFountainDecoderRef = useRef(new OpticalFountainDecoder());
-  const decodePoolRef = useRef(new OptiFrameDecodePool());
-  const surfacePoolRef = useRef(new OptiFrameSurfacePool());
+  // Keep worker pools stable across renders; useRef(new Pool()) evaluates the constructor every render.
+  const decodePoolRef = useRef<OptiFrameDecodePool>(null!);
+  if (decodePoolRef.current === null) decodePoolRef.current = new OptiFrameDecodePool();
+  const surfacePoolRef = useRef<OptiFrameSurfacePool>(null!);
+  if (surfacePoolRef.current === null) surfacePoolRef.current = new OptiFrameSurfacePool();
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const presentationCanvasRef = useRef<HTMLCanvasElement | null>(null);
